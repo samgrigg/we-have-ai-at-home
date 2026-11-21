@@ -5,6 +5,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from household.db import Database
+from household.telemetry import stage
 
 
 class Items(BaseModel):
@@ -46,7 +47,9 @@ TOOL_SCHEMAS = [
 ]
 
 
-def execute_tool(db: Database, job_id, call_id: str, name: str, args: dict, connection=None):
+def execute_tool(
+    db: Database, job_id, call_id: str, name: str, args: dict, connection=None, trace=None
+):
     if name not in {"list_items", "add_items", "remove_items"}:
         raise ValueError("Unknown shopping-list tool")
     if name == "list_items":
@@ -57,12 +60,20 @@ def execute_tool(db: Database, job_id, call_id: str, name: str, args: dict, conn
         items = Items.model_validate(args).items
     with (
         nullcontext(connection) if connection is not None else db.connect() as conn,
+        stage(trace, "sql.tool_transaction"),
         conn.transaction(),
     ):
+
+        def query(operation, sql, parameters=None):
+            with stage(trace, operation):
+                return conn.execute(sql, parameters)
+
         # Tool effects and receipts are atomic, including cross-conversation mutations.
-        conn.execute("SELECT pg_advisory_xact_lock(728346128)")
-        receipt = conn.execute(
-            "SELECT * FROM tool_receipts WHERE job_id = %s AND call_id = %s", (job_id, call_id)
+        query("sql.tool_lock", "SELECT pg_advisory_xact_lock(728346128)")
+        receipt = query(
+            "sql.receipt_lookup",
+            "SELECT * FROM tool_receipts WHERE job_id = %s AND call_id = %s",
+            (job_id, call_id),
         ).fetchone()
         if receipt:
             if receipt["tool_name"] != name or receipt["arguments"] != args:
@@ -70,18 +81,23 @@ def execute_tool(db: Database, job_id, call_id: str, name: str, args: dict, conn
             return receipt["result"]
         if name == "add_items":
             for item in items:
-                conn.execute(
-                    "INSERT INTO shopping_items(name) VALUES (%s) ON CONFLICT DO NOTHING", (item,)
+                query(
+                    "sql.item_insert",
+                    "INSERT INTO shopping_items(name) VALUES (%s) ON CONFLICT DO NOTHING",
+                    (item,),
                 )
         elif name == "remove_items":
-            conn.execute("DELETE FROM shopping_items WHERE name = ANY(%s)", (items,))
+            query("sql.items_delete", "DELETE FROM shopping_items WHERE name = ANY(%s)", (items,))
         result = {
             "items": [
                 r["name"]
-                for r in conn.execute("SELECT name FROM shopping_items ORDER BY name").fetchall()
+                for r in query(
+                    "sql.items_read", "SELECT name FROM shopping_items ORDER BY name"
+                ).fetchall()
             ]
         }
-        conn.execute(
+        query(
+            "sql.receipt_save",
             "INSERT INTO tool_receipts(job_id, call_id, tool_name, arguments, result) "
             "VALUES (%s, %s, %s, %s, %s)",
             (job_id, call_id, name, Jsonb(args), Jsonb(result)),

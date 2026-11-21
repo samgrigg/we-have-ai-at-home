@@ -287,3 +287,136 @@ def test_lost_claim_connection_cannot_continue_mutating_list(client, app):
         app, ScriptedModel(tool_call("add_items", {"items": ["milk"]}), answer("Recovered."))
     )
     assert client.get("/api/shopping-list").json() == [{"name": "milk"}]
+
+
+def test_job_logs_time_model_tools_sql_and_checkpoints(client, app, caplog):
+    import json
+    import logging
+
+    caplog.set_level(logging.INFO, logger="household.progress")
+    cid = conversation(client)
+    job = submit(client, cid, "Private shopping request").json()
+    work(
+        app,
+        ScriptedModel(
+            tool_call("remove_items", {"items": ["private item"]}, "remove-call"),
+            tool_call("add_items", {"items": ["milk"]}, "add-call"),
+            answer("Updated."),
+        ),
+    )
+    events = [json.loads(r.message) for r in caplog.records if r.name == "household.progress"]
+    finished = [e for e in events if e["event"] == "stage_finished"]
+    stages = {e["stage"] for e in finished}
+    assert {
+        "model.call",
+        "tool.execute",
+        "sql.receipt_save",
+        "checkpoint.save",
+        "checkpoint.write_tasks",
+        "checkpoint.load",
+        "history.load",
+        "job.save_completed",
+    } <= stages
+    assert all(e["job_id"] == job["id"] for e in events)
+    assert all(e["elapsed_ms"] >= 0 for e in finished)
+    assert "Private shopping request" not in caplog.text
+    assert "private item" not in caplog.text
+    assert client.get(f"/api/conversations/{cid}/messages").json()[0]["status"] == "completed"
+
+
+def test_malformed_tool_identifiers_do_not_leak_into_logs(client, app, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO)
+    submit(client, conversation(client))
+    work(
+        app,
+        ScriptedModel(
+            tool_call("private-invalid-tool", {}, "private-call-identifier"),
+            answer("Please clarify."),
+        ),
+    )
+    assert "private-invalid-tool" not in caplog.text
+    assert "private-call-identifier" not in caplog.text
+    assert "unknown" in caplog.text
+
+
+def test_tool_waits_for_checkpoint_pipeline_to_release_shared_connection(client, app):
+    import threading
+    from contextlib import contextmanager
+
+    from langgraph.checkpoint.postgres import PostgresSaver
+
+    from household.agent import build_graph
+    from household.db import Database
+
+    db = Database(app.state.settings.database_url)
+    job = submit(client, conversation(client)).json()
+    pipeline_open = threading.Event()
+    connection_attempted = threading.Event()
+    release_checkpoint = threading.Event()
+    failures = []
+
+    class Probe:
+        @contextmanager
+        def stage(self, name, **fields):
+            if name == "sql.tool_transaction":
+                # Capture overlap before waking the controlling thread. This also
+                # detects the old implementation, which never acquired saver.lock.
+                overlap = pipeline_open.is_set()
+                connection_attempted.set()
+                if overlap:
+                    raise AssertionError("Tool transaction entered an active checkpoint pipeline")
+            yield
+
+    class ObservedLock:
+        def __init__(self):
+            self.lock = threading.Lock()
+
+        def __enter__(self):
+            if threading.current_thread().name == "regression-tool":
+                connection_attempted.set()
+            self.lock.acquire()
+            return self
+
+        def __exit__(self, *args):
+            self.lock.release()
+
+    with db.connect(autocommit=True) as conn:
+        saver = PostgresSaver(conn)
+        saver.lock = ObservedLock()
+        graph = build_graph(db, job, ScriptedModel(), saver, conn, Probe())
+
+        def checkpoint_thread():
+            try:
+                # Same pipeline context and saver lock used by real checkpoint writes.
+                with saver._cursor(pipeline=True) as cursor:
+                    cursor.execute("SELECT 1")
+                    pipeline_open.set()
+                    assert release_checkpoint.wait(3)
+                    pipeline_open.clear()
+            except BaseException as exc:
+                failures.append(exc)
+
+        def tool_thread():
+            try:
+                graph.nodes["tools"].bound.invoke(
+                    {"messages": [tool_call("add_items", {"items": ["milk"]})]}
+                )
+            except BaseException as exc:
+                failures.append(exc)
+
+        checkpoint = threading.Thread(target=checkpoint_thread, daemon=True)
+        tool = threading.Thread(target=tool_thread, name="regression-tool", daemon=True)
+        checkpoint.start()
+        try:
+            assert pipeline_open.wait(2)
+            tool.start()
+            assert connection_attempted.wait(2)
+        finally:
+            release_checkpoint.set()
+            checkpoint.join(3)
+            tool.join(3)
+        assert not checkpoint.is_alive() and not tool.is_alive()
+        assert not failures, failures
+    assert client.get("/api/shopping-list").json() == [{"name": "milk"}]

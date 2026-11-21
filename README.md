@@ -17,6 +17,7 @@ docker compose up --build -d
 Open [localhost:8000](http://localhost:8000). Sign in as `family` using
 `HOUSEHOLD_PASSWORD`. This is a shared POC account: every user can read every
 conversation. The application deliberately does not identify individual family members.
+If port 8000 is occupied, set `API_PORT=8001` in `.env` and open localhost:8001 instead.
 
 Try:
 
@@ -47,6 +48,36 @@ uv run uvicorn household.api:create_app --factory --reload
 # In another terminal:
 uv run python -m household.worker
 ```
+
+For debugging a stuck request, follow worker stage logs and inspect the saved job:
+
+```sh
+docker compose logs -f api worker
+docker compose exec postgres psql -U household -d household -c \
+  "SELECT id, status, attempts, error, updated_at FROM jobs ORDER BY sequence DESC LIMIT 10;"
+```
+
+Worker logs identify `job_started`, `model_started`, `model_finished`,
+`tool_started`, `tool_finished`, and `job_completed`/`job_failed`. A job running
+for 60 seconds emits thread stacks for diagnosis; this does not cancel it.
+Structured JSON events add a correlated `job_id`, `stage`, elapsed milliseconds,
+and success/error outcome around model calls, tools, individual SQL operations,
+checkpoint loads/saves, conversation-history loading and final job persistence.
+For example, `sql.receipt_save` identifies saving the tool's replay receipt.
+
+While a request is running, a separate thread emits `job_progress` every five
+seconds with total elapsed time and every active stage's elapsed time. Stages
+lasting ten seconds trigger warning-level progress logs. Configure
+`PROGRESS_LOG_SECONDS` and `SLOW_STAGE_SECONDS` in `.env`; recreate the worker
+after changing them. These are diagnostics, not deadlines or automatic retries.
+Prompts, shopping item names, SQL parameters, keys and exception messages are
+excluded from the new timing events. Overlapping checkpoint operations can appear
+as separate active stages because LangGraph persists work in background threads.
+
+For Python breakpoints, stop the container worker and run the worker on the host
+using the command above. The local `.env` database URL points to localhost:5433.
+The Compose image has no source bind mount or automatic code reload; rebuild it
+with `docker compose up --build -d` after changing Python code.
 
 The API needs `DATABASE_URL` and `HOUSEHOLD_PASSWORD`; only the worker requires
 `OPENAI_API_KEY`. Settings are read from environment variables or a local `.env`.
@@ -128,6 +159,11 @@ limits and authentication rate limiting before sharing a public URL broadly.
 - Checkpoints, tool mutations and job completion use that same lock-owning
   connection. Losing the connection prevents a stale worker from continuing writes.
   Checkpoints are saved synchronously before the next graph step starts.
+- Tool transactions also acquire the checkpoint saver's connection lock. Psycopg's
+  per-query synchronization alone does not exclude a tool transaction from a
+  background checkpoint pipeline context on the shared connection. The shared
+  lock covers the complete tool transaction, including commit; logs label any wait
+  as `sql.connection_lock_wait`.
 - LangGraph checkpoints are per request. A retry resumes the last persisted step.
   Tool receipts and shopping changes commit atomically, so replaying a committed
   tool call returns its saved result without repeating the mutation.

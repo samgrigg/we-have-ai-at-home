@@ -13,3 +13,5 @@ class Settings(BaseSettings):
     input_usd_per_million: float | None = Field(default=None, ge=0)
     output_usd_per_million: float | None = Field(default=None, ge=0)
     worker_poll_seconds: float = Field(default=1.0, gt=0)
+    progress_log_seconds: float = Field(default=5.0, gt=0)
+    slow_stage_seconds: float = Field(default=10.0, gt=0)

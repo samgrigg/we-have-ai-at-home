@@ -32,7 +32,7 @@ services:
   api:
     <<: *app
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
       init:
         condition: service_completed_successfully
@@ -45,6 +45,8 @@ services:
       <<: *environment
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
       MODEL_NAME: ${MODEL_NAME:-gpt-4.1-mini}
+      PROGRESS_LOG_SECONDS: ${PROGRESS_LOG_SECONDS:-5}
+      SLOW_STAGE_SECONDS: ${SLOW_STAGE_SECONDS:-10}
     depends_on:
       init:
         condition: service_completed_successfully

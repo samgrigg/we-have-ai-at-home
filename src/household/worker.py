@@ -5,11 +5,11 @@ import time
 from contextlib import nullcontext
 
 from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.checkpoint.postgres import PostgresSaver
 
 from household.agent import build_graph
 from household.config import Settings
 from household.db import Database
+from household.telemetry import JobTrace, TracedPostgresSaver
 
 logger = logging.getLogger("household.worker")
 
@@ -65,23 +65,35 @@ def _process(db, job, model, settings, claim):
     # A blocked database/checkpoint operation otherwise looks like an idle worker.
     # Stack traces contain code locations, not message contents or credentials.
     faulthandler.dump_traceback_later(60)
+    trace = JobTrace(
+        job["id"], interval=settings.progress_log_seconds, slow_seconds=settings.slow_stage_seconds
+    )
+    trace.start()
     try:
         # All durable writes use the lock-owning connection. If it dies, this
         # worker cannot keep saving state after another worker reclaims the job.
         with nullcontext(claim) as checkpoint_conn:
-            graph = build_graph(
-                db, job, model or make_model(settings), PostgresSaver(checkpoint_conn), claim
-            )
+            with trace.stage("graph.build"):
+                graph = build_graph(
+                    db,
+                    job,
+                    model or make_model(settings),
+                    TracedPostgresSaver(checkpoint_conn, trace),
+                    claim,
+                    trace,
+                )
             config = {"configurable": {"thread_id": str(job["id"])}, "recursion_limit": 16}
             snapshot = graph.get_state(config)
             if snapshot.values:
-                result = (
-                    graph.invoke(None, config, durability="sync")
-                    if snapshot.next
-                    else snapshot.values
-                )
+                logger.info("job_resuming id=%s pending_nodes=%s", job["id"], snapshot.next)
+                with trace.stage("graph.resume"):
+                    result = (
+                        graph.invoke(None, config, durability="sync")
+                        if snapshot.next
+                        else snapshot.values
+                    )
             else:
-                with db.connect() as conn:
+                with trace.stage("history.load"), db.connect() as conn:
                     previous = conn.execute(
                         "SELECT content, response FROM ("
                         "SELECT sequence, content, response FROM jobs "
@@ -93,7 +105,8 @@ def _process(db, job, model, settings, claim):
                 for row in previous:
                     messages.extend([HumanMessage(row["content"]), AIMessage(row["response"])])
                 messages.append(HumanMessage(job["content"], id=str(job["id"])))
-                result = graph.invoke({"messages": messages}, config, durability="sync")
+                with trace.stage("graph.run"):
+                    result = graph.invoke({"messages": messages}, config, durability="sync")
             final = result["messages"][-1]
             if not isinstance(final, AIMessage) or final.tool_calls:
                 raise ValueError("Graph did not produce a final answer")
@@ -114,7 +127,7 @@ def _process(db, job, model, settings, claim):
                     input_tokens * settings.input_usd_per_million
                     + output_tokens * settings.output_usd_per_million
                 ) / 1_000_000
-            with nullcontext(claim) as conn:
+            with trace.stage("job.save_completed"), nullcontext(claim) as conn:
                 conn.execute(
                     "UPDATE jobs SET status = 'completed', response = %s, error = NULL, "
                     "input_tokens = %s, output_tokens = %s, estimated_cost_usd = %s, model = %s, "
@@ -131,7 +144,7 @@ def _process(db, job, model, settings, claim):
     except Exception as exc:
         # Provider exception text can contain request contents or credentials.
         logger.error("job_failed id=%s error_type=%s", job["id"], type(exc).__name__)
-        with nullcontext(claim) as conn:
+        with trace.stage("job.save_failed"), nullcontext(claim) as conn:
             conn.execute(
                 "UPDATE jobs SET status = 'failed', error = %s, updated_at = now() WHERE id = %s",
                 (
@@ -141,6 +154,7 @@ def _process(db, job, model, settings, claim):
                 ),
             )
     finally:
+        trace.close()
         faulthandler.cancel_dump_traceback_later()
 
 
