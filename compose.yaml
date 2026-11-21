@@ -1,0 +1,55 @@
+x-app: &app
+  build: .
+  environment: &environment
+    DATABASE_URL: postgresql://household:household-local-only@postgres:5432/household
+    HOUSEHOLD_PASSWORD: ${HOUSEHOLD_PASSWORD:?Set HOUSEHOLD_PASSWORD in .env}
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: household
+      POSTGRES_USER: household
+      POSTGRES_PASSWORD: household-local-only
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U household -d household"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  init:
+    <<: *app
+    command: ["python", "-m", "household.db"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "household.worker"]
+    environment:
+      <<: *environment
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      MODEL_NAME: ${MODEL_NAME:-gpt-4.1-mini}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    stop_grace_period: 60s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
