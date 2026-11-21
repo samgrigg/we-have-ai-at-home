@@ -1,3 +1,4 @@
+import faulthandler
 import logging
 import signal
 import time
@@ -60,6 +61,10 @@ def run_once(db: Database, model=None, settings: Settings | None = None):
 
 def _process(db, job, model, settings, claim):
     started = time.monotonic()
+    logger.info("job_started id=%s attempt=%s", job["id"], job["attempts"])
+    # A blocked database/checkpoint operation otherwise looks like an idle worker.
+    # Stack traces contain code locations, not message contents or credentials.
+    faulthandler.dump_traceback_later(60)
     try:
         # All durable writes use the lock-owning connection. If it dies, this
         # worker cannot keep saving state after another worker reclaims the job.
@@ -135,6 +140,8 @@ def _process(db, job, model, settings, claim):
                     job["id"],
                 ),
             )
+    finally:
+        faulthandler.cancel_dump_traceback_later()
 
 
 def main():
