@@ -139,15 +139,34 @@ def configure_auth(app, db, settings):
 
     @app.get("/auth/callback")
     async def callback(request: Request):
+        # Capture only presence/counts before Authlib consumes the one-time state.
+        state = request.query_params.get("state", "")
+        stored_states = [key for key in request.session if key.startswith("_state_google_")]
+        state_matches = bool(state) and "_state_google_" + state in stored_states
+        stage = "token_validation"
         try:
             token = await oauth.google.authorize_access_token(request)
             # Authlib verifies state, nonce and signed OIDC claims before userinfo is returned.
             if not token.get("id_token") or not token.get("userinfo"):
                 raise ValueError("Missing verified ID token")
+            stage = "identity_enrollment"
             user = auth.enroll(token["userinfo"])
+            stage = "session_creation"
             session = auth.new_session(user["id"])
         except Exception as exc:
-            logger.warning("google_signin_rejected error_type=%s", type(exc).__name__)
+            logger.warning(
+                "google_signin_rejected error_type=%s stage=%s oauth_cookie_present=%s "
+                "stored_state_count=%s state_matches=%s oauth_cookie_count=%s",
+                type(exc).__name__,
+                stage,
+                "household_oauth" in request.cookies,
+                len(stored_states),
+                state_matches,
+                sum(
+                    part.strip().startswith("household_oauth=")
+                    for part in request.headers.get("cookie", "").split(";")
+                ),
+            )
             request.session.clear()
             raise HTTPException(400, "Google sign-in failed or account is not approved") from None
         request.session.clear()

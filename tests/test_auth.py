@@ -108,3 +108,18 @@ def test_oauth_authorization_codes_are_removed_from_access_logs():
     assert OAuthAccessLogFilter().filter(record)
     assert "private-code" not in record.getMessage()
     assert "private-state" not in record.getMessage()
+
+
+def test_failed_callback_logs_state_presence_without_credentials(app, caplog):
+    import logging
+
+    from fastapi.testclient import TestClient
+
+    with caplog.at_level(logging.WARNING, logger="household.auth"):
+        with TestClient(app, base_url="http://localhost:8001") as c:
+            c.get("/auth/callback?code=sensitive-code&state=sensitive-state")
+    assert "oauth_cookie_present=False" in caplog.text
+    assert "stored_state_count=0" in caplog.text
+    assert "state_matches=False" in caplog.text
+    assert "sensitive-code" not in caplog.text
+    assert "sensitive-state" not in caplog.text
