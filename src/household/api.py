@@ -1,4 +1,5 @@
 from importlib.resources import files
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -44,7 +45,17 @@ def create_app(settings: Settings | None = None):
 
     @app.middleware("http")
     async def private_responses(request, call_next):
-        response = await call_next(request)
+        # A host-only OAuth cookie must be created on the callback hostname.
+        # Canonicalize browser entry points before generating any state.
+        if request.url.path in {"/", "/signin", "/auth/login"} and (
+            request.headers.get("host", "").lower()
+            != urlsplit(settings.public_base_url).netloc.lower()
+        ):
+            response = RedirectResponse(
+                settings.public_base_url + request.url.path, status_code=303
+            )
+        else:
+            response = await call_next(request)
         if not request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-store"
             response.headers["Referrer-Policy"] = "no-referrer"
