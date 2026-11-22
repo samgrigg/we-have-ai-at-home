@@ -156,3 +156,34 @@ its replacement is a separate change requiring compatible client settings and ev
 Successful jobs record token usage. Optional `INPUT_USD_PER_MILLION` and
 `OUTPUT_USD_PER_MILLION` worker settings enable an approximate cost estimate.
 Voice, calendars, SMS, allowance and multiple households remain outside this increment.
+
+
+## Recipe links (POV)
+
+Paste a public HTTPS recipe link into a personal or Family chat. For example:
+“Import this recipe, double it, and leave out the seasonings we already have: URL”.
+The assistant reads structured Recipe data, then prepares an ingredient preview.
+Review the quantities, uncheck pantry items, and press **Confirm ingredients**.
+Nothing from a recipe request is added until its requesting member confirms.
+Other Family chat members can view a shared preview and continue unrelated list edits.
+Use **Dismiss recipe** to discard a preview. Repeated confirmation does not add twice.
+
+Quantities stay in the item text (for example, “2 cups chicken broth”). Simple leading
+quantities, fractions and ranges can be scaled. Package sizes and unclear quantities
+are flagged for review; items are not merged by quantity. Possible overlaps are
+highlighted, and exact normalized duplicate strings are kept once. Pantry omissions
+apply to this request only; the app does not maintain an inventory of pantry supplies.
+
+This first version reads JSON-LD Recipe ingredients, without running page scripts,
+following page instructions or performing general web search. Use clean recipe
+permalinks without query parameters. Login-protected/blocked sites, pages without
+structured ingredients, more than 60 ingredients or lines longer than 120 characters
+fall back to pasting ingredients into chat. That existing pasted-text flow remains a
+normal shopping request; the new confirmation preview applies to recipe URLs.
+
+The reader permits public HTTPS only on port 443, validates every redirect and all
+DNS results, and pins the checked destination IP while verifying TLS against the
+original hostname. Fetching runs in a credential-free subprocess killed after 25
+seconds, with bounded redirects and a 2 MB response cap. It holds no shared shopping
+list lock while contacting a recipe site. Tool traces include fetch timing without
+logging URLs or page contents. A numbered additive migration stores recipe previews.

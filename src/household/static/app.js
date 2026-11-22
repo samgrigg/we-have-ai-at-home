@@ -8,6 +8,8 @@ let conversations = [];
 let currentUser = null;
 let csrfToken = null;
 let identityEpoch = 0;
+let lastRecipeRender = "";
+const recipeSelections = new Map();
 
 function requireEpoch(epoch) {
   if (epoch !== identityEpoch) {
@@ -18,9 +20,9 @@ function requireEpoch(epoch) {
 function reportError(error) { if (!error.stale) notice(error.message); }
 
 function clearSensitiveState() {
-  identityEpoch++;
+  identityEpoch++; lastRecipeRender = ""; recipeSelections.clear();
   current = null; pending = null; conversations = []; lastRender = ''; csrfToken = null;
-  for (const id of ['messages','shopping-list','conversations','retry-area']) $(id).replaceChildren();
+  for (const id of ['messages','shopping-list','conversations','retry-area','recipe-imports']) $(id).replaceChildren();
   $('message').value = ''; $('current-user').textContent = ''; $('chat-title').textContent = '';
   $('scope-label').textContent = '';
   sessionStorage.removeItem('household-pending');
@@ -113,7 +115,7 @@ async function loadConversations() {
     button.className = c.id === current ? 'active' : '';
     button.disabled = Boolean(pending);
     button.onclick = async () => {
-      current = c.id; lastRender = '';
+      current = c.id; lastRender = ''; lastRecipeRender = ''; recipeSelections.clear(); $('recipe-imports').replaceChildren();
       localStorage.setItem('household-conversation', current);
       try { await loadConversations(); await refresh(); } catch (error) { reportError(error); }
     };
@@ -134,6 +136,63 @@ function bubble(role, text, author = 'You') {
   div.append(label, content); $('messages').append(div);
 }
 
+
+function renderRecipes(recipes, cid) {
+  const signature = JSON.stringify([cid,recipes]);
+  if (signature === lastRecipeRender) return;
+  lastRecipeRender = signature;
+  $('recipe-imports').replaceChildren();
+  for (const recipe of recipes) {
+    if (recipe.status === 'dismissed') continue;
+    const card = document.createElement('article'); card.className='recipe-preview';
+    const title = document.createElement('h3'); title.textContent=recipe.title;
+    const source = document.createElement('a'); source.href=recipe.source_url;
+    source.target='_blank'; source.rel='noopener noreferrer'; source.textContent='View source recipe';
+    const description = document.createElement('p');
+    description.textContent=`Original yield: ${recipe.recipe_yield} · Quantities ×${recipe.multiplier}. Review package sizes and optional ingredients.`;
+    card.append(title,source,description);
+    const selections=[];
+    recipe.ingredients.forEach((item,index)=>{
+      const label=document.createElement('label'); label.className='recipe-ingredient';
+      const box=document.createElement('input'); box.type='checkbox';
+      const version=JSON.stringify([recipe.ingredients,recipe.multiplier]);
+      if(recipeSelections.get(recipe.id)?.version!==version) recipeSelections.set(recipe.id,{version,selected:recipe.ingredients.map(i=>i.selected)});
+      box.checked=recipe.status==='confirmed'?recipe.confirmed_indices.includes(index):recipeSelections.get(recipe.id).selected[index];
+      box.onchange=()=>{recipeSelections.get(recipe.id).selected[index]=box.checked;};
+      box.disabled=recipe.status!=='draft' || !recipe.can_confirm;
+      const text=document.createElement('span');
+      const normalized=item.text.toLowerCase();
+      const overlap=recipe.existing_items.some(existing=>normalized.includes(existing.toLowerCase()) || existing.toLowerCase().includes(normalized));
+      text.textContent=item.text+(overlap?' · Possible overlap on your list':'')+(item.check_quantity?' · Check quantity':'');
+      label.append(box,text); card.append(label); selections.push([index,box]);
+    });
+    const status=document.createElement('p'); status.className='muted';
+    status.textContent=recipe.status==='confirmed'?'Ingredients added to the shared list.':recipe.can_confirm?'Uncheck anything you already have. Only selected ingredients will be added.':'Waiting for the completed preview; only the requesting member can confirm.';
+    card.append(status);
+    if(recipe.status==='draft' && recipe.can_confirm){
+      const confirm=document.createElement('button'); confirm.className='primary'; confirm.textContent='Confirm ingredients';
+      const dismiss=document.createElement('button'); dismiss.textContent='Dismiss recipe';
+      const epoch=identityEpoch;
+      const act=async(action)=>{
+        requireEpoch(epoch);
+        confirm.disabled=true; dismiss.disabled=true;
+        try {
+          const selected_indices=selections.filter(([,box])=>box.checked).map(([index])=>index);
+          if(action==='confirm' && !selected_indices.length) throw new Error('Select at least one ingredient.');
+          await api(`/api/recipe-imports/${recipe.id}/${action}`,{method:'POST',...(action==='confirm'?{body:JSON.stringify({selected_indices})}:{})});
+          requireEpoch(epoch);
+          if(cid!==current)return;
+          lastRecipeRender=''; await refresh();
+        }catch(error){reportError(error);}
+        finally{confirm.disabled=false; dismiss.disabled=false;}
+      };
+      confirm.onclick=()=>act('confirm'); dismiss.onclick=()=>act('dismiss');
+      card.append(confirm,dismiss);
+    }
+    $('recipe-imports').append(card);
+  }
+}
+
 async function refresh() {
   if (polling) return;
   polling = true;
@@ -141,12 +200,14 @@ async function refresh() {
     if (await loadIdentity()) await loadConversations();
     const epoch = identityEpoch;
     const cid = current;
-    const [jobs, items] = await Promise.all([
+    const [jobs, items, recipes] = await Promise.all([
       cid ? api(`/api/conversations/${cid}/messages`) : Promise.resolve([]),
       api('/api/shopping-list'),
+      cid ? api(`/api/conversations/${cid}/recipe-imports`) : Promise.resolve([]),
     ]);
     requireEpoch(epoch);
     if (cid !== current) return;
+    renderRecipes(recipes, cid);
     const signature = JSON.stringify(jobs);
     if (signature !== lastRender) {
       $('messages').replaceChildren(); $('retry-area').replaceChildren();
@@ -196,7 +257,7 @@ async function createConversation(title = 'New conversation') {
   const epoch = identityEpoch;
   const c = await api('/api/conversations', {method: 'POST', body: JSON.stringify({title})});
   requireEpoch(epoch);
-  current = c.id; lastRender = '';
+  current = c.id; lastRender = ''; lastRecipeRender = ''; recipeSelections.clear(); $('recipe-imports').replaceChildren();
   localStorage.setItem('household-conversation', current);
   $('messages').replaceChildren(); $('retry-area').replaceChildren();
   await loadConversations();

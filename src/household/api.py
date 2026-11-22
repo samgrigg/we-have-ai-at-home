@@ -10,6 +10,7 @@ from household.access import require_conversation
 from household.auth import COOKIE, configure_auth
 from household.config import Settings
 from household.db import Database
+from household.recipe_import import configure_recipe_routes
 
 
 class ConversationInput(BaseModel):
@@ -37,6 +38,7 @@ def create_app(settings: Settings | None = None):
     app.state.settings = settings
     auth = configure_auth(app, db, settings)
     authenticated = Depends(auth.current)
+    configure_recipe_routes(app, db, authenticated)
     static = files("household").joinpath("static")
     app.mount("/static", StaticFiles(directory=str(static), check_dir=False), name="static")
 

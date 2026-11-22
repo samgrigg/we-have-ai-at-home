@@ -38,7 +38,7 @@ async function harness(pending = null) {
       if (path === '/auth/logout') throw new SyntaxError('Empty 204 response');
       if (path === '/api/me') return identity;
       if (path === '/api/conversations') return requestIdentity.id === 'u1' ? [{id:'c1', title:'First',visibility:'private'}, {id:'c2', title:'Empty',visibility:'private'}] : [{id:'c3',title:'Other member',visibility:'private'}];
-      if (path === '/api/shopping-list') return [];
+      if (path === '/api/shopping-list' || path.endsWith('/recipe-imports')) return [];
       return path.includes('/c1/') ? jobs : [];
     }};},
   });
@@ -88,3 +88,45 @@ async function harness(pending = null) {
   assert.equal(late.elements.get('chat-title').textContent,'Other member');
   console.log('8 browser recovery and privacy checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
+
+// Recipe previews use safe text nodes, explicit selections and authenticated APIs.
+(async () => {
+  const h = await harness();
+  vm.runInContext(`renderRecipes([{id:'r1',created_by:'u1',title:'<script>unsafe</script>',source_url:'https://recipe.example/soup',recipe_yield:'4',multiplier:2,status:'draft',can_confirm:true,existing_items:['chicken'],ingredients:[{text:'2 lb chicken',selected:true,check_quantity:false},{text:'salt',selected:false,check_quantity:true}]}], 'c1')`, h.context);
+  const card=h.elements.get('recipe-imports').children[0];
+  assert(card, 'recipe preview should render');
+  assert.equal(card.children[0].textContent,'<script>unsafe</script>');
+  const labels=card.children.filter(e=>e.className==='recipe-ingredient');
+  assert.equal(labels[0].children[0].checked,true);
+  assert.equal(labels[1].children[0].checked,false);
+  assert(labels[0].children[1].textContent.includes('Possible overlap'));
+  vm.runInContext('clearSensitiveState()',h.context);
+  assert.equal(h.elements.get('recipe-imports').children.length,0,'account changes must clear recipe data');
+  console.log('Recipe preview rendering and privacy checks passed');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+
+(async () => {
+  const h=await harness();
+  const draft={id:'r2',created_by:'u1',title:'Soup',source_url:'https://recipe.example/soup',recipe_yield:'4',multiplier:1,status:'draft',can_confirm:true,existing_items:[],ingredients:[{text:'milk',selected:true}]};
+  h.context.previewFixture=draft;
+  vm.runInContext('renderRecipes([previewFixture], "c1")',h.context);
+  let box=h.elements.get('recipe-imports').children[0].children.find(e=>e.className==='recipe-ingredient').children[0];
+  box.checked=false; box.onchange();
+  draft.existing_items=['bread'];
+  vm.runInContext('renderRecipes([previewFixture], "c1")',h.context);
+  box=h.elements.get('recipe-imports').children[0].children.find(e=>e.className==='recipe-ingredient').children[0];
+  assert.equal(box.checked,false,'list updates must preserve user checkbox selections');
+  console.log('Recipe checkbox persistence check passed');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+
+(async () => {
+  const h=await harness();
+  const draft={id:'r3',title:'Soup',source_url:'https://recipe.example/soup',recipe_yield:'4',multiplier:1,status:'draft',can_confirm:false,existing_items:[],ingredients:[{text:'salt',selected:true}]};
+  h.context.previewFixture=draft;
+  vm.runInContext('renderRecipes([previewFixture], "c1")',h.context);
+  draft.can_confirm=true; draft.ingredients[0].selected=false;
+  vm.runInContext('renderRecipes([previewFixture], "c1")',h.context);
+  const box=h.elements.get('recipe-imports').children[0].children.find(e=>e.className==='recipe-ingredient').children[0];
+  assert.equal(box.checked,false,'a revised preview must use the final server omission selection');
+  console.log('Recipe revision selection check passed');
+})().catch(error=>{console.error(error);process.exitCode=1;});
