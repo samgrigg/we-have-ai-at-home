@@ -1,6 +1,6 @@
 # POV increment: Google accounts and conversation privacy
 
-Status: proposed design for user review; no implementation changes yet.
+Status: approved for local implementation. Existing shopping data is disposable.
 
 ## Confirmed requirements
 
@@ -58,6 +58,11 @@ inserts. Existing shopping items have unknown original authors.
   their own conversations, plus the shared Family chat and shared legacy archive.
 - There is no parent/administrator override to read private chats in this increment.
   Household administration stays in deployment configuration for now.
+- An authorized conversation participant can skip a failed request. It becomes
+  terminal/cancelled, keeps its audit/receipt data and any committed list effects,
+  and stops blocking later messages. Cancelled exchanges are excluded from model
+  history. This also recovers Family chat when a former member's queued work fails
+  authorization after their membership is removed.
 
 Privacy applies to conversational history and access. Actions against shared tools
 are shared effects: an item added in a private chat appears on the household list,
@@ -68,7 +73,7 @@ or stored as cross-conversation model memory.
 
 Existing POC conversations were shared. Preserve them as a clearly labeled shared
 POC archive, without guessing ownership or assigning private authors. Make this
-archive read-only. Preserve the current shopping list. Start a new Family chat and
+archive read-only. Reset the disposable shopping list once during migration. Start a new Family chat and
 new personal conversations after migration. Do not delete checkpoint or receipt data.
 
 ## Browser changes

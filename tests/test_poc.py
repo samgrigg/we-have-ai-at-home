@@ -1,6 +1,10 @@
 from uuid import uuid4
 
 
+def shopping(client):
+    return [{"name": item["name"]} for item in client.get("/api/shopping-list").json()]
+
+
 def conversation(client):
     response = client.post("/api/conversations", json={"title": "Groceries"})
     assert response.status_code == 201
@@ -15,8 +19,8 @@ def submit(client, cid, text="Add milk", request_id=None):
 
 
 def test_private_routes_require_authentication(client):
-    client.auth = None
-    for path in ["/", "/api/conversations", "/api/shopping-list"]:
+    client.cookies.clear()
+    for path in ["/api/conversations", "/api/shopping-list"]:
         assert client.get(path).status_code == 401
     assert client.get("/health").status_code == 200
 
@@ -31,9 +35,10 @@ def test_conversation_and_message_survive_new_api_instance(client, app):
 
     from household.api import create_app
 
-    with TestClient(create_app(app.state.settings)) as restarted:
-        restarted.auth = client.auth
-        assert restarted.get("/api/conversations").json()[0]["id"] == cid
+    with TestClient(create_app(app.state.settings), base_url="http://localhost:8001") as restarted:
+        restarted.cookies.update(client.cookies)
+        restarted.headers.update(client.headers)
+        assert cid in {r["id"] for r in restarted.get("/api/conversations").json()}
         jobs = restarted.get(f"/api/conversations/{cid}/messages").json()
         assert jobs[0]["content"] == "Add milk"
         assert jobs[0]["id"] == job["id"]
@@ -65,7 +70,7 @@ def test_missing_conversation_and_invalid_messages(client):
 def test_browser_and_empty_list(client):
     assert "<html" in client.get("/").text
     assert client.get("/static/app.js").status_code == 200
-    assert client.get("/api/shopping-list").json() == []
+    assert shopping(client) == []
 
 
 class ScriptedModel:
@@ -116,11 +121,11 @@ def test_real_graph_updates_shared_list_across_conversations(client, app):
             tool_call("add_items", {"items": ["Milk", "eggs", " milk "]}), answer("Added.")
         ),
     )
-    assert client.get("/api/shopping-list").json() == [{"name": "eggs"}, {"name": "milk"}]
+    assert shopping(client) == [{"name": "eggs"}, {"name": "milk"}]
     other = conversation(client)
     submit(client, other, "Remove eggs")
     work(app, ScriptedModel(tool_call("remove_items", {"items": ["eggs"]}), answer("Removed.")))
-    assert client.get("/api/shopping-list").json() == [{"name": "milk"}]
+    assert shopping(client) == [{"name": "milk"}]
     submit(client, cid, "What did I ask before?")
     model = ScriptedModel(answer("You asked to add milk and eggs."))
     work(app, model)
@@ -157,7 +162,7 @@ def test_tool_receipt_prevents_replay_after_other_changes(client, app):
     removed = execute_tool(db, job["id"], "b", "remove_items", {"items": ["milk"]})
     execute_tool(db, job["id"], "c", "add_items", {"items": ["milk"]})
     assert execute_tool(db, job["id"], "b", "remove_items", {"items": ["milk"]}) == removed
-    assert client.get("/api/shopping-list").json() == [{"name": "milk"}]
+    assert shopping(client) == [{"name": "milk"}]
 
 
 def test_processing_job_is_reclaimed_but_locked_conversation_is_not(client, app):
@@ -181,7 +186,7 @@ def test_retry_resumes_checkpoint_without_repeating_model_tool_choice(client, ap
         app,
         ScriptedModel(tool_call("add_items", {"items": ["milk"]}), RuntimeError("network failure")),
     )
-    assert client.get("/api/shopping-list").json() == [{"name": "milk"}]
+    assert shopping(client) == [{"name": "milk"}]
     client.post(f"/api/jobs/{job['id']}/retry")
     # Recreated graph/saver reads the persisted checkpoint and resumes at the model node.
     resumed = ScriptedModel(answer("Milk is on the list."))
@@ -220,7 +225,7 @@ def test_invalid_tool_input_has_no_database_effect(client, app):
         answer("Which items should I add?"),
     )
     work(app, model)
-    assert client.get("/api/shopping-list").json() == []
+    assert shopping(client) == []
     from langchain_core.messages import ToolMessage
 
     assert any(isinstance(m, ToolMessage) and m.status == "error" for m in model.seen[-1])
@@ -281,12 +286,12 @@ def test_lost_claim_connection_cannot_continue_mutating_list(client, app):
         work(app, model)
     except psycopg.OperationalError:
         pass
-    assert client.get("/api/shopping-list").json() == []
+    assert shopping(client) == []
     assert client.get(f"/api/conversations/{cid}/messages").json()[0]["status"] == "processing"
     assert work(
         app, ScriptedModel(tool_call("add_items", {"items": ["milk"]}), answer("Recovered."))
     )
-    assert client.get("/api/shopping-list").json() == [{"name": "milk"}]
+    assert shopping(client) == [{"name": "milk"}]
 
 
 def test_job_logs_time_model_tools_sql_and_checkpoints(client, app, caplog):
@@ -419,4 +424,4 @@ def test_tool_waits_for_checkpoint_pipeline_to_release_shared_connection(client,
             tool.join(3)
         assert not checkpoint.is_alive() and not tool.is_alive()
         assert not failures, failures
-    assert client.get("/api/shopping-list").json() == [{"name": "milk"}]
+    assert shopping(client) == [{"name": "milk"}]

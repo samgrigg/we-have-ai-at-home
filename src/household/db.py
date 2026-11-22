@@ -20,7 +20,25 @@ class Database:
             # Serialize schema initialization across API/worker release jobs.
             conn.execute("SELECT pg_advisory_lock(728346126)")
             try:
-                conn.execute(files("household").joinpath("schema.sql").read_text())
+                with conn.transaction():
+                    conn.execute(files("household").joinpath("schema.sql").read_text())
+                    conn.execute(
+                        "CREATE TABLE IF NOT EXISTS app_migrations "
+                        "(version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT now())"
+                    )
+                    for migration in sorted(
+                        files("household").joinpath("migrations").iterdir(), key=lambda p: p.name
+                    ):
+                        if not migration.name.endswith(".sql"):
+                            continue
+                        applied = conn.execute(
+                            "SELECT 1 FROM app_migrations WHERE version=%s", (migration.name,)
+                        ).fetchone()
+                        if not applied:
+                            conn.execute(migration.read_text())
+                            conn.execute(
+                                "INSERT INTO app_migrations(version) VALUES (%s)", (migration.name,)
+                            )
                 PostgresSaver(conn).setup()
             finally:
                 conn.execute("SELECT pg_advisory_unlock(728346126)")

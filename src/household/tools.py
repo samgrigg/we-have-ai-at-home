@@ -83,8 +83,9 @@ def execute_tool(
             for item in items:
                 query(
                     "sql.item_insert",
-                    "INSERT INTO shopping_items(name) VALUES (%s) ON CONFLICT DO NOTHING",
-                    (item,),
+                    "INSERT INTO shopping_items(name,added_by) VALUES "
+                    "(%s,(SELECT submitted_by FROM jobs WHERE id=%s)) ON CONFLICT DO NOTHING",
+                    (item, job_id),
                 )
         elif name == "remove_items":
             query("sql.items_delete", "DELETE FROM shopping_items WHERE name = ANY(%s)", (items,))

@@ -28,7 +28,14 @@ def app(database_url):
     from household.config import Settings
     from household.db import Database
 
-    settings = Settings(database_url=database_url, household_password="test-password-123")
+    settings = Settings(
+        database_url=database_url,
+        family_allowed_emails=",".join(f"member{i}@example.com" for i in range(5)),
+        google_client_id="test-client",
+        google_client_secret="test-secret",
+        session_secret="test-session-secret-with-at-least-32-characters",
+        public_base_url="http://localhost:8001",
+    )
     Database(database_url).setup()
     return create_app(settings)
 
@@ -37,6 +44,20 @@ def app(database_url):
 def client(app):
     from fastapi.testclient import TestClient
 
-    with TestClient(app) as client:
-        client.auth = ("family", "test-password-123")
+    with TestClient(app, base_url="http://localhost:8001") as client:
+        from household.auth import COOKIE
+
+        user = app.state.auth.enroll(
+            {
+                "sub": "google-0",
+                "email": "member0@example.com",
+                "email_verified": True,
+                "name": "Member 0",
+            }
+        )
+        token = app.state.auth.new_session(user["id"])
+        client.cookies.set(COOKIE, token)
+        client.headers.update(
+            {"Origin": "http://localhost:8001", "X-CSRF-Token": app.state.auth.csrf(token)}
+        )
         yield client

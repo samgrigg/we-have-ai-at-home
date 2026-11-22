@@ -8,18 +8,19 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header><a href="/" class="brand">household<span> / </span></a><span class="badge">PROOF OF CONCEPT</span></header>
+  <header><a href="/" class="brand">household<span> / </span></a><div class="account"><span id="current-user"></span><button id="logout">Sign out</button></div></header>
   <main>
     <aside class="conversations">
       <p class="eyebrow">A LITTLE LESS TO REMEMBER</p>
       <h1>Room for the<br>everyday.</h1>
       <p class="muted">One shared list. A helping hand.</p>
-      <button id="new-chat" class="primary">＋ New conversation</button>
+      <button id="new-chat" class="primary">＋ New personal chat</button>
       <nav id="conversations" aria-label="Conversations"></nav>
-      <p class="privacy">Shared household space.<br>Everyone with access can read these chats.</p>
+      <p class="privacy">Your personal chats stay private.<br>Family chat and shopping are shared.</p>
     </aside>
     <section class="chat" aria-label="Chat">
       <div class="chat-heading"><h2 id="chat-title">Your household assistant</h2><span class="dot">Shopping list ready</span></div>
+      <p id="scope-label" class="muted" role="status"></p>
       <div id="messages" role="log" aria-live="polite">
         <div class="welcome"><span class="welcome-icon">✳</span><h2>What’s on your mind?</h2><p>I can help keep your shopping list in order.<br>Try “Add milk and eggs to the list.”</p></div>
       </div>
@@ -30,7 +31,7 @@
         <textarea id="message" placeholder="A little help with the groceries…" maxlength="4000" rows="2" required></textarea>
         <button id="send" class="primary" type="submit">Send ↗</button>
       </form>
-      <p class="composer-note">Shopping changes are saved across conversations.</p>
+      <p class="composer-note">Shopping-list changes are shared with all five family members, even from personal chats.</p>
     </section>
     <aside class="shopping">
       <p class="eyebrow">THE HOUSEHOLD LIST</p><h2>Pick up next time</h2>

@@ -2,7 +2,7 @@ x-app: &app
   build: .
   environment: &environment
     DATABASE_URL: postgresql://household:household-local-only@postgres:5432/household
-    HOUSEHOLD_PASSWORD: ${HOUSEHOLD_PASSWORD:?Set HOUSEHOLD_PASSWORD in .env}
+    FAMILY_ALLOWED_EMAILS: ${FAMILY_ALLOWED_EMAILS:?Set five FAMILY_ALLOWED_EMAILS in .env}
 
 services:
   postgres:
@@ -31,6 +31,12 @@ services:
 
   api:
     <<: *app
+    environment:
+      <<: *environment
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?Set GOOGLE_CLIENT_ID in .env}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?Set GOOGLE_CLIENT_SECRET in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8001}
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:

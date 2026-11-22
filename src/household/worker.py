@@ -70,6 +70,24 @@ def _process(db, job, model, settings, claim):
     )
     trace.start()
     try:
+        with trace.stage("job.authorize"):
+            context = claim.execute(
+                "SELECT c.visibility,c.owner_user_id,u.id AS actor_id,u.email,u.display_name "
+                "FROM jobs j JOIN conversations c ON c.id=j.conversation_id "
+                "JOIN users u ON u.id=j.submitted_by WHERE j.id=%s",
+                (job["id"],),
+            ).fetchone()
+            if (
+                not context
+                or context["email"] not in settings.family_emails
+                or context["visibility"] == "legacy_shared"
+                or (
+                    context["visibility"] == "private"
+                    and context["owner_user_id"] != context["actor_id"]
+                )
+            ):
+                raise PermissionError("Job identity or conversation access is invalid")
+            job = {**job, "visibility": context["visibility"], "actor_id": context["actor_id"]}
         # All durable writes use the lock-owning connection. If it dies, this
         # worker cannot keep saving state after another worker reclaims the job.
         with nullcontext(claim) as checkpoint_conn:
@@ -95,16 +113,30 @@ def _process(db, job, model, settings, claim):
             else:
                 with trace.stage("history.load"), db.connect() as conn:
                     previous = conn.execute(
-                        "SELECT content, response FROM ("
-                        "SELECT sequence, content, response FROM jobs "
+                        "SELECT content, response, submitted_by FROM ("
+                        "SELECT sequence, content, response, submitted_by FROM jobs "
                         "WHERE conversation_id = %s AND status = 'completed' AND sequence < %s "
                         "ORDER BY sequence DESC LIMIT 40) history ORDER BY sequence",
                         (job["conversation_id"], job["sequence"]),
                     ).fetchall()
                 messages = []
                 for row in previous:
-                    messages.extend([HumanMessage(row["content"]), AIMessage(row["response"])])
-                messages.append(HumanMessage(job["content"], id=str(job["id"])))
+                    messages.extend(
+                        [
+                            HumanMessage(
+                                row["content"],
+                                name="member_" + str(row["submitted_by"]).replace("-", ""),
+                            ),
+                            AIMessage(row["response"]),
+                        ]
+                    )
+                messages.append(
+                    HumanMessage(
+                        job["content"],
+                        id=str(job["id"]),
+                        name="member_" + str(job["actor_id"]).replace("-", ""),
+                    )
+                )
                 with trace.stage("graph.run"):
                     result = graph.invoke({"messages": messages}, config, durability="sync")
             final = result["messages"][-1]
@@ -161,6 +193,8 @@ def _process(db, job, model, settings, claim):
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     settings = Settings()
+    if len(settings.family_emails) != 5:
+        raise ValueError("Configure the five FAMILY_ALLOWED_EMAILS for the worker")
     db = Database(settings.database_url)
     model = make_model(settings)
     stopping = False
