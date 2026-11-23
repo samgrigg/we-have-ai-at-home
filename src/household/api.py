@@ -11,6 +11,7 @@ from household.access import require_conversation
 from household.auth import COOKIE, configure_auth
 from household.config import Settings
 from household.db import Database
+from household.groceries import configure_grocery_routes
 from household.kroger import KrogerClient
 from household.product_selection import configure_product_routes
 from household.recipe_import import configure_recipe_routes
@@ -44,6 +45,7 @@ def create_app(settings: Settings | None = None):
     app.state.kroger = KrogerClient(
         settings.kroger_client_id, settings.kroger_client_secret, settings.kroger_location_id
     )
+    configure_grocery_routes(app, db, authenticated)
     configure_product_routes(app, db, authenticated)
     configure_recipe_routes(app, db, authenticated)
     static = files("household").joinpath("static")
@@ -90,8 +92,9 @@ def create_app(settings: Settings | None = None):
     def conversations(user=authenticated):
         with db.connect() as conn:
             return conn.execute(
-                "SELECT * FROM conversations WHERE visibility IN ('family','legacy_shared') "
-                "OR owner_user_id=%s ORDER BY created_at DESC",
+                "SELECT * FROM conversations WHERE purpose='chat' "
+                "AND (visibility IN ('family','legacy_shared') "
+                "OR owner_user_id=%s) ORDER BY created_at DESC",
                 (user["id"],),
             ).fetchall()
 
@@ -157,7 +160,7 @@ def create_app(settings: Settings | None = None):
     def shopping_list(user=authenticated):
         with db.connect() as conn:
             return conn.execute(
-                "SELECT s.name,s.requirement,u.display_name AS added_by_name, "
+                "SELECT s.name,s.requirement,s.checked,s.revision,u.display_name AS added_by_name, "
                 "CASE WHEN p.item_name IS NULL THEN NULL ELSE "
                 "jsonb_build_object('product',p.product,'packages',p.packages,"
                 "'location_id',p.location_id,'checked_at',p.checked_at,"

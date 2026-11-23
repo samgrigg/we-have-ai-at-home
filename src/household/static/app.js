@@ -10,8 +10,8 @@ let csrfToken = null;
 let identityEpoch = 0;
 let productRequest = 0;
 let productItem = null;
-let lastRecipeRender = "";
 const recipeSelections = new Map();
+const recipeRenderSignatures = new Map();
 
 function requireEpoch(epoch) {
   if (epoch !== identityEpoch) {
@@ -19,10 +19,10 @@ function requireEpoch(epoch) {
     error.stale = true; throw error;
   }
 }
-function reportError(error) { if (!error.stale) notice(error.message); }
+function reportError(error) { if (!error.stale) { notice(error.message); groceryError(error); } }
 
 function clearSensitiveState() {
-  identityEpoch++; closeProductSearch(); lastRecipeRender = ""; recipeSelections.clear();
+  identityEpoch++; clearGroceryState(); recipeRenderSignatures.clear(); closeProductSearch(); recipeSelections.clear();
   current = null; pending = null; conversations = []; lastRender = ''; csrfToken = null;
   for (const id of ['messages','shopping-list','conversations','retry-area','recipe-imports']) $(id).replaceChildren();
   $('message').value = ''; $('current-user').textContent = ''; $('chat-title').textContent = '';
@@ -56,7 +56,7 @@ async function api(path, options = {}) {
     }
     let message = `Request failed (${response.status})`;
     try { const body = await response.json(); if (typeof body.detail === 'string') message = body.detail; } catch {}
-    throw new Error(message);
+    const error = new Error(message); error.status = response.status; throw error;
   }
   if (response.status === 204) return null;
   const data = await response.json();
@@ -117,7 +117,7 @@ async function loadConversations() {
     button.className = c.id === current ? 'active' : '';
     button.disabled = Boolean(pending);
     button.onclick = async () => {
-      current = c.id; lastRender = ''; lastRecipeRender = ''; recipeSelections.clear(); $('recipe-imports').replaceChildren();
+      current = c.id; lastRender = ''; recipeRenderSignatures.delete('recipe-imports'); $('recipe-imports').replaceChildren();
       localStorage.setItem('household-conversation', current);
       try { await loadConversations(); await refresh(); } catch (error) { reportError(error); }
     };
@@ -133,17 +133,17 @@ function bubble(role, text, author = 'You') {
   const div = document.createElement('div');
   div.className = `message ${role}`;
   const label = document.createElement('span');
-  label.className = 'speaker'; label.textContent = role === 'user' ? author : 'Household';
+  label.className = 'speaker'; label.textContent = role === 'user' ? author : 'Bridget';
   const content = document.createElement('span'); content.textContent = text;
   div.append(label, content); $('messages').append(div);
 }
 
 
-function renderRecipes(recipes, cid) {
+function renderRecipes(recipes, cid, target = 'recipe-imports') {
   const signature = JSON.stringify([cid,recipes]);
-  if (signature === lastRecipeRender) return;
-  lastRecipeRender = signature;
-  $('recipe-imports').replaceChildren();
+  if (signature === recipeRenderSignatures.get(target)) return;
+  recipeRenderSignatures.set(target, signature);
+  $(target).replaceChildren();
   for (const recipe of recipes) {
     if (recipe.status === 'dismissed') continue;
     const card = document.createElement('article'); card.className='recipe-preview';
@@ -158,9 +158,9 @@ function renderRecipes(recipes, cid) {
       const label=document.createElement('label'); label.className='recipe-ingredient';
       const box=document.createElement('input'); box.type='checkbox';
       const version=JSON.stringify([recipe.ingredients,recipe.multiplier]);
-      if(recipeSelections.get(recipe.id)?.version!==version) recipeSelections.set(recipe.id,{version,selected:recipe.ingredients.map(i=>i.selected)});
-      box.checked=recipe.status==='confirmed'?recipe.confirmed_indices.includes(index):recipeSelections.get(recipe.id).selected[index];
-      box.onchange=()=>{recipeSelections.get(recipe.id).selected[index]=box.checked;};
+      if(recipeSelections.get(target + recipe.id)?.version!==version) recipeSelections.set(target + recipe.id,{version,selected:recipe.ingredients.map(i=>i.selected)});
+      box.checked=recipe.status==='confirmed'?recipe.confirmed_indices.includes(index):recipeSelections.get(target + recipe.id).selected[index];
+      box.onchange=()=>{recipeSelections.get(target + recipe.id).selected[index]=box.checked;};
       box.disabled=recipe.status!=='draft' || !recipe.can_confirm;
       const text=document.createElement('span');
       const normalized=item.text.toLowerCase();
@@ -183,15 +183,15 @@ function renderRecipes(recipes, cid) {
           if(action==='confirm' && !selected_indices.length) throw new Error('Select at least one ingredient.');
           await api(`/api/recipe-imports/${recipe.id}/${action}`,{method:'POST',...(action==='confirm'?{body:JSON.stringify({selected_indices})}:{})});
           requireEpoch(epoch);
-          if(cid!==current)return;
-          lastRecipeRender=''; await refresh();
+          if(target==='recipe-imports' && cid!==current)return;
+          recipeRenderSignatures.delete(target); await refresh();
         }catch(error){reportError(error);}
         finally{confirm.disabled=false; dismiss.disabled=false;}
       };
       confirm.onclick=()=>act('confirm'); dismiss.onclick=()=>act('dismiss');
       card.append(confirm,dismiss);
     }
-    $('recipe-imports').append(card);
+    $(target).append(card);
   }
 }
 
@@ -270,72 +270,71 @@ function renderProductResults(result,epoch,request){
   });
 }
 
+async function refreshChat() {
+  const epoch = identityEpoch;
+  const cid = current;
+  const [jobs, recipes] = await Promise.all([
+    cid ? api(`/api/conversations/${cid}/messages`) : Promise.resolve([]),
+    cid ? api(`/api/conversations/${cid}/recipe-imports`) : Promise.resolve([]),
+  ]);
+  requireEpoch(epoch);
+  if (cid !== current) return;
+  renderRecipes(recipes, cid);
+  const signature = JSON.stringify(jobs);
+  if (signature !== lastRender) {
+    $('messages').replaceChildren(); $('retry-area').replaceChildren();
+    for (const job of jobs) {
+      bubble('user', job.content, job.submitted_by === currentUser.id ? 'You' : job.author_name || 'POC member');
+      if (job.response) bubble('assistant', job.response);
+      if (job.status !== 'completed') {
+        const status = document.createElement('p');
+        status.className = `job-state ${job.status}`;
+        status.textContent = job.status === 'cancelled' ? 'Request skipped. Any completed list changes remain saved.' : job.status === 'failed' ? job.error : job.status === 'queued' ? 'Waiting for the assistant…' : 'Working on it…';
+        $('messages').append(status);
+      }
+    }
+    $('messages').scrollTop = $('messages').scrollHeight;
+    lastRender = signature;
+  }
+  // Keep both kinds of recovery available when another tab submitted first.
+  $('retry-area').replaceChildren();
+  for (const job of jobs) {
+    if (job.status === 'failed') {
+      retryButton('Retry request', async () => {
+        await api(`/api/jobs/${job.id}/retry`, {method: 'POST'}); lastRender = ''; await refresh();
+      });
+      retryButton('Skip failed request', async () => {
+        await api(`/api/jobs/${job.id}/cancel`, {method:'POST'}); lastRender=''; await refresh();
+      });
+    }
+  }
+  if (pending) submissionControls();
+  setBusy(jobs.some((j) => !['completed','cancelled'].includes(j.status)));
+}
+
 async function refresh() {
   if (polling) return;
   polling = true;
   try {
-    if (await loadIdentity()) await loadConversations();
+    if (await loadIdentity()) { await loadConversations(); await loadCommandConversation(); }
     const epoch = identityEpoch;
-    const cid = current;
-    const [jobs, items, recipes] = await Promise.all([
-      cid ? api(`/api/conversations/${cid}/messages`) : Promise.resolve([]),
-      api('/api/shopping-list'),
-      cid ? api(`/api/conversations/${cid}/recipe-imports`) : Promise.resolve([]),
+    // A failed chat or recipe request must not prevent the shared list from loading.
+    const results = await Promise.allSettled([
+      api('/api/shopping-list').then(items => {
+        requireEpoch(epoch);
+        if (productItem && !items.some(item => item.name === productItem)) closeProductSearch();
+        renderGroceryItems(items);
+      }),
+      refreshCommands(),
+      refreshChat(),
     ]);
     requireEpoch(epoch);
-    if (cid !== current) return;
-    renderRecipes(recipes, cid);
-    const signature = JSON.stringify(jobs);
-    if (signature !== lastRender) {
-      $('messages').replaceChildren(); $('retry-area').replaceChildren();
-      for (const job of jobs) {
-        bubble('user', job.content, job.submitted_by === currentUser.id ? 'You' : job.author_name || 'POC member');
-        if (job.response) bubble('assistant', job.response);
-        if (job.status !== 'completed') {
-          const status = document.createElement('p');
-          status.className = `job-state ${job.status}`;
-          status.textContent = job.status === 'cancelled' ? 'Request skipped. Any completed list changes remain saved.' : job.status === 'failed' ? job.error : job.status === 'queued' ? 'Waiting for the assistant…' : 'Working on it…';
-          $('messages').append(status);
-        }
+    for (const [index, result] of results.entries()) {
+      if (result.status === 'rejected' && !result.reason.stale) {
+        if (index === 2) notice(result.reason.message);
+        else if (index === 1) $('command-notice').textContent = result.reason.message;
+        else groceryError(result.reason);
       }
-      $('messages').scrollTop = $('messages').scrollHeight;
-      lastRender = signature;
-    }
-    // Keep both kinds of recovery available when another tab submitted first.
-    $('retry-area').replaceChildren();
-    for (const job of jobs) {
-      if (job.status === 'failed') {
-        retryButton('Retry request', async () => {
-          await api(`/api/jobs/${job.id}/retry`, {method: 'POST'}); lastRender = ''; await refresh();
-        });
-        retryButton('Skip failed request', async () => {
-          await api(`/api/jobs/${job.id}/cancel`, {method:'POST'}); lastRender=''; await refresh();
-        });
-      }
-    }
-    if (pending) submissionControls();
-    setBusy(jobs.some((j) => !['completed','cancelled'].includes(j.status)));
-    if(productItem && !items.some(item=>item.name===productItem)) closeProductSearch();
-    $('shopping-list').replaceChildren();
-    for (const item of items) {
-      const li = document.createElement('li'); li.textContent = item.name;
-      if (item.added_by_name) {
-        const by = document.createElement('span'); by.className='item-author'; by.textContent='Added by '+item.added_by_name; li.append(by);
-      }
-      if(item.product_selection){
-        const selected=item.product_selection;
-        const details=document.createElement('p'); details.className='selected-product';
-        details.textContent=`Selected: ${selected.packages} × ${selected.product.description} (${selected.product.size}). Price observed ${new Date(selected.checked_at).toLocaleString()}. Chosen by ${selected.selected_by_name}.`;
-        li.append(details);
-      }
-      const find=document.createElement('button'); find.textContent=item.product_selection?'Change product':'Find products at Smith’s';
-      find.onclick=()=>openProductSearch(item);
-      li.append(find);
-      $('shopping-list').append(li);
-    }
-    if (!items.length) {
-      const li = document.createElement('li'); li.className = 'empty';
-      li.textContent = 'Your list is empty. Add something in chat.'; $('shopping-list').append(li);
     }
   } finally { polling = false; }
 }
@@ -344,7 +343,7 @@ async function createConversation(title = 'New conversation') {
   const epoch = identityEpoch;
   const c = await api('/api/conversations', {method: 'POST', body: JSON.stringify({title})});
   requireEpoch(epoch);
-  current = c.id; lastRender = ''; lastRecipeRender = ''; recipeSelections.clear(); $('recipe-imports').replaceChildren();
+  current = c.id; lastRender = ''; recipeRenderSignatures.delete('recipe-imports'); $('recipe-imports').replaceChildren();
   localStorage.setItem('household-conversation', current);
   $('messages').replaceChildren(); $('retry-area').replaceChildren();
   await loadConversations();
@@ -395,8 +394,13 @@ $('message').addEventListener('keydown', (event) => {
 });
 
 async function start() {
+  initGroceries();
   try {
     await loadIdentity();
+    await loadCommandConversation();
+    try { commandPending = JSON.parse(sessionStorage.getItem('household-command-pending') || 'null'); } catch { sessionStorage.removeItem('household-command-pending'); }
+    if (commandPending && (commandPending.user_id !== currentUser.id || commandPending.cid !== commandCid)) { commandPending = null; sessionStorage.removeItem('household-command-pending'); }
+    if (commandPending) $('command-notice').textContent = 'An unsent command was recovered. Resend it to check its status safely.';
     pending = JSON.parse(sessionStorage.getItem('household-pending') || 'null');
     if (pending && pending.user_id !== currentUser.id) {
       pending = null; sessionStorage.removeItem('household-pending');

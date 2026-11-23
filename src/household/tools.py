@@ -5,7 +5,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from household.db import Database
-from household.products import requirement_metadata
+from household.groceries import add_grocery_item
 from household.recipe_import import RECIPE_TOOLS, RecipePreview, RecipeURL, recipe_tool
 from household.telemetry import stage
 
@@ -125,21 +125,27 @@ def execute_tool(
                 )
         if name == "add_items":
             for item in items:
-                query(
-                    "sql.item_insert",
-                    "INSERT INTO shopping_items(name,added_by,requirement) VALUES "
-                    "(%s,(SELECT submitted_by FROM jobs WHERE id=%s),%s) ON CONFLICT DO NOTHING",
-                    (item, job_id, Jsonb(requirement_metadata(item))),
-                )
+                author = query(
+                    "sql.item_author", "SELECT submitted_by FROM jobs WHERE id=%s", (job_id,)
+                ).fetchone()["submitted_by"]
+                add_grocery_item(conn, item, author)
         elif name == "remove_items":
             query("sql.items_delete", "DELETE FROM shopping_items WHERE name = ANY(%s)", (items,))
         result = {
             "items": [
                 r["name"]
                 for r in query(
-                    "sql.items_read", "SELECT name FROM shopping_items ORDER BY name"
+                    "sql.items_read",
+                    "SELECT name FROM shopping_items WHERE checked=false ORDER BY name",
                 ).fetchall()
-            ]
+            ],
+            "picked_up": [
+                r["name"]
+                for r in query(
+                    "sql.picked_up_read",
+                    "SELECT name FROM shopping_items WHERE checked=true ORDER BY name",
+                ).fetchall()
+            ],
         }
         query(
             "sql.receipt_save",

@@ -212,7 +212,7 @@ def test_list_tool_reads_database_and_records_configured_cost(client, app):
     from langchain_core.messages import ToolMessage
 
     tool_result = next(m for m in model.seen[-1] if isinstance(m, ToolMessage))
-    assert json.loads(tool_result.content) == {"items": ["milk"]}
+    assert json.loads(tool_result.content) == {"items": ["milk"], "picked_up": []}
     job = client.get(f"/api/conversations/{other}/messages").json()[0]
     assert abs(job["estimated_cost_usd"] - 0.00002) < 1e-10
 

@@ -238,3 +238,40 @@ recipe ingredients both populate this metadata; migration setup backfills older
 items. Product search reads the persisted requirement. Common abbreviations such
 as c/c., tbs/tbsp, tsp, oz and lb are recognized; unknown quantities remain marked
 for review. An edited product search also strips a recognized quantity prefix.
+
+## Bridget: groceries first
+
+Bridget ("We Have AI At Home") now opens to the shared grocery workspace.
+Use **Tell Bridget** for a quick entry such as “milk”, a semantic request, or a
+recipe link. Results, progress, recipe review and retry controls appear beside
+the list. Each member has a dedicated private grocery command context; opening
+or switching personal/Family chat does not change that context. Grocery changes
+remain shared. **Chat with Bridget** opens the optional conversation panel.
+
+Check items off into **Picked up**, uncheck them to put them back, or use **Edit**
+to change the ingredient and quantity (for example, “2 cups milk”). These direct
+controls do not call the model. Checking does not add pantry inventory. Adding a
+picked-up item again puts it back on the active list. Confirming the same recipe
+preview twice remains safe and does not reapply changes after its first confirmation.
+Name/quantity edits clear that item's product searches and selected product;
+check-off preserves them. Remembered usual products persist.
+
+Edits and removal use revision tokens. If another member changes an item, the app
+preserves your draft and asks you to review the latest state before saving again.
+Migration `005_grocery_workspace.sql` preserves existing list data and adds
+checked state, revision tracking, and private command contexts. Apply through
+`python -m household.db` before serving the updated API/worker. Rebuild both
+containers for local use; no hosted deployment is included in this change.
+
+Additional browser-state verification:
+
+```sh
+node --check src/household/static/groceries.js
+node tests/grocery-browser.test.cjs
+```
+
+The visual direction uses original mid-century domestic styling inspired by
+Gidget, Alice from The Brady Bunch and Rosie from The Jetsons: cream, appliance
+blue, teal, restrained coral and rounded controls. Television artwork and character
+likenesses are not shipped with the app. Meal planning, homework and pantry
+inventory remain future work.

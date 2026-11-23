@@ -3,43 +3,47 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Household · A little less to remember</title>
+  <meta name="theme-color" content="#28626b">
+  <title>Groceries · Bridget</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/groceries.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header><a href="/" class="brand">household<span> / </span></a><div class="account"><span id="current-user"></span><button id="logout">Sign out</button></div></header>
-  <main>
-    <aside class="conversations">
-      <p class="eyebrow">A LITTLE LESS TO REMEMBER</p>
-      <h1>Room for the<br>everyday.</h1>
-      <p class="muted">One shared list. A helping hand.</p>
-      <button id="new-chat" class="primary">＋ New personal chat</button>
-      <nav id="conversations" aria-label="Conversations"></nav>
-      <p class="privacy">Your personal chats stay private.<br>Family chat and shopping are shared.</p>
-    </aside>
-    <section class="chat" aria-label="Chat">
-      <div class="chat-heading"><h2 id="chat-title">Your household assistant</h2><span class="dot">Shopping list ready</span></div>
-      <p id="scope-label" class="muted" role="status"></p>
-      <div id="messages" role="log" aria-live="polite">
-        <div class="welcome"><span class="welcome-icon">✳</span><h2>What’s on your mind?</h2><p>I can help keep your shopping list in order.<br>Try “Add milk and eggs” or paste a recipe link.</p></div>
-      </div>
-      <section id="recipe-imports" aria-label="Recipe ingredient previews"></section>
-      <p id="notice" role="status"></p>
-      <div id="retry-area"></div>
-      <form id="composer">
-        <label class="sr-only" for="message">Message</label>
-        <textarea id="message" placeholder="A little help with the groceries…" maxlength="4000" rows="2" required></textarea>
-        <button id="send" class="primary" type="submit">Send ↗</button>
-      </form>
-      <p class="composer-note">Shopping-list changes are shared with all five family members, even from personal chats.</p>
-    </section>
-    <aside class="shopping">
-      <p class="eyebrow">THE HOUSEHOLD LIST</p><h2>Pick up next time</h2>
-      <p class="muted">Updated as you chat.</p>
+  <header class="app-header">
+    <a href="/" class="brand" aria-label="Bridget home"><span class="brand-star" aria-hidden="true">✳</span> bridget<span class="brand-period">.</span></a>
+    <span class="brand-tagline">WE HAVE AI AT HOME</span>
+    <div class="account"><span id="current-user"></span><button id="logout" class="quiet">Sign out</button></div>
+  </header>
+  <main class="app-shell">
+    <div class="workspace-top"><span class="workspace-tab"><span aria-hidden="true">▦</span> Groceries</span><button id="open-chat" aria-controls="chat-panel" aria-expanded="false">Chat with Bridget <span aria-hidden="true">↗</span></button></div>
+    <section class="grocery-workspace" aria-labelledby="grocery-title">
+      <div class="grocery-heading"><div><p class="eyebrow">A LITTLE HELP AROUND THE HOUSE</p><h1 id="grocery-title">Groceries, handled<span class="coral">.</span></h1><p class="intro">One shared list. A little less to remember.</p></div><div class="home-seal" aria-hidden="true"><span>✳</span><small>ON THE LIST.<br>OFF YOUR MIND.</small></div></div>
+      <section class="command-card" aria-labelledby="command-heading">
+        <div class="command-label"><h2 id="command-heading">Tell Bridget</h2><span>YOUR EVERYDAY HELPING HAND</span></div>
+        <form id="command-form"><label class="sr-only" for="command">Add groceries or tell Bridget what you need</label><textarea id="command" rows="1" maxlength="4000" placeholder="Milk, eggs… or “add what I need for tacos for six”" required></textarea><button id="command-send" class="primary" type="submit">Make it happen <span aria-hidden="true">↗</span></button></form>
+        <p class="command-hint">Add a few things, paste a recipe link, or ask for a hand.</p>
+        <p class="privacy-note">Your requests are private. Grocery changes are shared with your family.</p>
+        <div id="command-result" role="status" aria-live="polite"><p id="command-response"></p><p id="command-notice"></p></div>
+        <div id="command-retry" class="recovery-controls"></div>
+        <section id="command-recipes" aria-label="Grocery recipe ingredient previews"></section>
+      </section>
+      <section class="list-card" aria-labelledby="list-title">
+        <div class="list-heading"><div><p class="eyebrow">FOR YOUR NEXT STORE RUN</p><h2 id="list-title">The grocery list</h2></div><span id="list-count" class="count-badge">Shared with family</span></div>
+        <p id="grocery-notice" class="error-note" role="status"></p>
+        <ul id="shopping-list" class="grocery-list"><li class="empty">Loading your list…</li></ul>
+        <details id="picked-up"><summary>Picked up <span id="picked-up-count">0</span></summary><ul id="picked-up-list" class="grocery-list"></ul><p class="privacy-note">Picked up stays here until you remove it. Pantry tracking is coming later.</p></details>
+        <div class="list-footer"><span><span class="status-dot" aria-hidden="true"></span> One list for the whole family</span><span>Made room for the everyday.</span></div>
+      </section>
       <section id="product-search" aria-label="Smith’s product suggestions"></section>
-      <ul id="shopping-list"><li class="empty">Your list is empty. Add something in chat.</li></ul>
-    </aside>
+      <footer class="workspace-footer">A little organization. A lot more living. <span aria-hidden="true">✳</span></footer>
+    </section>
   </main>
+  <div id="chat-backdrop" hidden></div>
+  <aside id="chat-panel" class="chat-panel" aria-labelledby="panel-title" hidden>
+    <div class="panel-heading"><h2 id="panel-title">A word with Bridget</h2><button id="close-chat" aria-label="Close chat">✕</button></div>
+    <div class="conversations"><button id="new-chat">＋ New personal chat</button><nav id="conversations" aria-label="Conversations"></nav></div>
+    <section class="chat" aria-label="Chat"><div class="chat-heading"><h3 id="chat-title">Your household assistant</h3></div><p id="scope-label" class="privacy-note" role="status"></p><div id="messages" role="log" aria-live="polite"></div><section id="recipe-imports" aria-label="Chat recipe ingredient previews"></section><p id="notice" role="status"></p><div id="retry-area" class="recovery-controls"></div><form id="composer"><label class="sr-only" for="message">Message Bridget</label><textarea id="message" placeholder="What’s on your mind?" maxlength="4000" rows="2" required></textarea><button id="send" class="primary" type="submit">Send ↗</button></form><p class="privacy-note">Personal chats stay private. Family chat and grocery changes are shared.</p></section>
+  </aside>
 </body>
 </html>

@@ -16,19 +16,23 @@ function storage(initial = {}) {
 }
 async function harness(pending = null) {
   const elements = new Map();
+  let items = [];
+  let commandJobs = [];
+  const requests = [];
   let jobs = [{id:'job1', content:'Old message', response:'Old reply', status:'completed'}];
   let identity = {id:'u1',display_name:'Member 1',csrf_token:'token'};
   let authenticated = true;
   let destination = null;
   let heldConversation = null;
   const context = vm.createContext({
-    document: {getElementById(id) { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); }, createElement: () => {const el=new Element(); Object.defineProperty(el,'id',{set(value){elements.set(value,el);}}); return el;}},
+    document: {getElementById(id) { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); }, createElement: tag => {const el=new Element(); el.tagName=tag; Object.defineProperty(el,'id',{set(value){elements.set(value,el);}}); return el;}},
     localStorage: storage({'household-conversation': 'c1'}),
     sessionStorage: storage(pending ? {'household-pending': JSON.stringify(pending)} : {}),
     crypto: require('crypto'),
     location: {assign(path) {destination=path;}},
     setInterval() {},
-    fetch: async path => {
+    fetch: async (path, options = {}) => {
+      requests.push({path,options});
       const requestIdentity = identity;
       if (path === '/api/conversations' && heldConversation) {
         const held = heldConversation; heldConversation = null;
@@ -38,13 +42,17 @@ async function harness(pending = null) {
       if (path === '/auth/logout') throw new SyntaxError('Empty 204 response');
       if (path === '/api/me') return identity;
       if (path === '/api/conversations') return requestIdentity.id === 'u1' ? [{id:'c1', title:'First',visibility:'private'}, {id:'c2', title:'Empty',visibility:'private'}] : [{id:'c3',title:'Other member',visibility:'private'}];
-      if (path === '/api/shopping-list' || path.endsWith('/recipe-imports')) return [];
+      if (path === '/api/grocery-commands') return {id:'g1'};
+      if (path === '/api/shopping-list') return items;
+      if (path.endsWith('/recipe-imports')) return [];
+      if (path.includes('/g1/')) return commandJobs;
       return path.includes('/c1/') ? jobs : [];
     }};},
   });
+  vm.runInContext(readFileSync('src/household/static/groceries.js', 'utf8'), context);
   vm.runInContext(readFileSync('src/household/static/app.js', 'utf8'), context);
   await new Promise(setImmediate);
-  return {elements, context, setJobs(value) { jobs = value; }, setIdentity(value) {identity=value;}, expire() {authenticated=false;}, destination() {return destination;}, holdNextConversationList() {heldConversation={}; return heldConversation;}};
+  return {elements, context, requests, setItems(value) {items=value;}, setCommandJobs(value) {commandJobs=value;}, setJobs(value) { jobs = value; }, setIdentity(value) {identity=value;}, expire() {authenticated=false;}, destination() {return destination;}, holdNextConversationList() {heldConversation={}; return heldConversation;}};
 }
 
 (async () => {
@@ -152,3 +160,5 @@ async function harness(pending = null) {
  assert.equal(h.elements.get('product-search').children.length,0,'closed searches must reject delayed product results');
  console.log('Delayed product response fencing check passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});
+
+module.exports = {harness, Element};
