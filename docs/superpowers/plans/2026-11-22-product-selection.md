@@ -16,7 +16,7 @@ Credentials and token values must never appear in output. Store 70600153.
 - [x] Migration/search/selection/preference endpoints with auth, stale and CSRF tests.
 - [x] Browser product panel and saved choice display; regression and identity tests.
 - [x] API-only Docker/Render configuration and documentation.
-- [ ] Review, full tests, image build, read-only live catalog smoke and local restart.
+- [x] Review, full tests, image build, read-only live catalog smoke and local restart.
 
 ## Verification results
 
@@ -28,3 +28,11 @@ Credentials and token values must never appear in output. Store 70600153.
 - Independent review findings (container counts, prepared substitutes, nut butter and promo/malformed data) resolved and rechecked.
 - Docker engine is unresponsive. Image build and local restart remain pending Docker recovery; existing app data/volumes were not changed.
 - No Render configuration changes or deployment performed for this feature. No cart functionality added.
+
+## November 23 recovery verification
+
+Docker recovered after host restart. All 84 tests passed again on Docker PostgreSQL,
+plus browser and static checks. API/worker images built; production image smoke
+verified migration, live Kroger search, selection, replay and attribution in a
+disposable schema. Local API/worker restarted with additive migration003. Health,
+updated UI and protected product search verified. Hosted Render remains unchanged.
