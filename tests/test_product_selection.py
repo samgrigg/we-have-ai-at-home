@@ -114,3 +114,30 @@ def test_out_of_stock_and_insufficient_package_count_are_rejected(client, app, m
         ).status_code
         == 422
     )
+
+
+def test_grocery_requirement_metadata_drives_search(client, app, monkeypatch):
+    from decimal import Decimal
+
+    from household.db import Database
+
+    job = submit(client, conversation(client), "Add broth").json()
+    execute_tool(
+        app.state.auth.db, job["id"], "broth", "add_items", {"items": ["1 c chicken broth"]}
+    )
+    item = client.get("/api/shopping-list").json()[0]
+    assert item["requirement"]["term"] == "chicken broth"
+    assert Decimal(item["requirement"]["amount"]) == 8
+    searched = []
+    monkeypatch.setattr(app.state.kroger, "search", lambda term: searched.append(term) or [])
+    assert client.post("/api/products/search", json={"item_name": item["name"]}).status_code == 200
+    assert searched == ["chicken broth"]
+    with app.state.auth.db.connect() as conn:
+        conn.execute("INSERT INTO shopping_items(name) VALUES ('2 c chicken broth')")
+    Database(app.state.settings.database_url).setup()
+    with app.state.auth.db.connect() as conn:
+        row = conn.execute(
+            "SELECT requirement FROM shopping_items WHERE name='2 c chicken broth'"
+        ).fetchone()
+        assert row["requirement"]["term"] == "chicken broth"
+        assert Decimal(row["requirement"]["amount"]) == 16

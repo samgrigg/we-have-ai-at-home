@@ -10,8 +10,8 @@ from household.recipes import NUMBER, UNICODE_FRACTIONS
 # US customary liquid measures; masses use grams. Never cross dimensions.
 UNITS = {}
 for names, dimension, factor, base in [
-    ("cup cups", "volume", "8", "fl oz"),
-    ("tbsp tablespoon tablespoons", "volume", "0.5", "fl oz"),
+    ("c cup cups", "volume", "8", "fl oz"),
+    ("tbs tbsp tablespoon tablespoons", "volume", "0.5", "fl oz"),
     ("tsp teaspoon teaspoons", "volume", str(Decimal(1) / Decimal(6)), "fl oz"),
     ("fl oz|fluid ounce|fluid ounces|floz", "volume", "1", "fl oz"),
     ("pt pint pints", "volume", "16", "fl oz"),
@@ -320,3 +320,19 @@ def rank_products(requirement, products, preferred_id=None):
 
     result.sort(key=score)
     return result[:12]
+
+
+def requirement_metadata(text):
+    requirement = parse_requirement(text)
+    return {
+        **requirement,
+        "amount": str(requirement["amount"]) if requirement["amount"] is not None else None,
+    }
+
+
+def stored_requirement(metadata, text):
+    requirement = dict(metadata) if metadata else requirement_metadata(text)
+    requirement["amount"] = (
+        Decimal(requirement["amount"]) if requirement["amount"] is not None else None
+    )
+    return requirement

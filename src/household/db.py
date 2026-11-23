@@ -2,6 +2,9 @@ from importlib.resources import files
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
+
+from household.products import requirement_metadata
 
 
 class Database:
@@ -39,6 +42,17 @@ class Database:
                             conn.execute(
                                 "INSERT INTO app_migrations(version) VALUES (%s)", (migration.name,)
                             )
+                # Backfill parsed metadata with the same parser used by all new writes.
+                # Null also supports upgrades from earlier deployments/direct inserts.
+                with conn.transaction():
+                    for row in conn.execute(
+                        "SELECT name FROM shopping_items WHERE requirement IS NULL"
+                    ).fetchall():
+                        conn.execute(
+                            "UPDATE shopping_items SET requirement=%s "
+                            "WHERE name=%s AND requirement IS NULL",
+                            (Jsonb(requirement_metadata(row["name"])), row["name"]),
+                        )
                 PostgresSaver(conn).setup()
             finally:
                 conn.execute("SELECT pg_advisory_unlock(728346126)")

@@ -134,3 +134,10 @@ def test_butter_does_not_match_nut_butter_or_compound_dishes():
         "dairy"
     ]
     assert rank_products(parse_requirement("1 lb peanut butter"), [values[1]])
+
+
+def test_abbreviated_cups_are_separated_from_ingredient_name():
+    for text in ["1 c chicken broth", "1 c. chicken broth", "1 C chicken broth"]:
+        req = parse_requirement(text)
+        assert req["term"] == "chicken broth"
+        assert req["amount"] == Decimal("8") and req["unit"] == "fl oz"

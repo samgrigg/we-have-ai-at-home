@@ -8,7 +8,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
 from household.kroger import KrogerError
-from household.products import parse_requirement, rank_products
+from household.products import parse_requirement, rank_products, stored_requirement
 
 
 class Search(BaseModel):
@@ -37,13 +37,14 @@ def configure_product_routes(app, db, authenticated):
     def search(body: Search, user=authenticated):
         with db.connect() as conn:
             item = conn.execute(
-                "SELECT name,created_at FROM shopping_items WHERE name=%s", (body.item_name,)
+                "SELECT name,created_at,requirement FROM shopping_items WHERE name=%s",
+                (body.item_name,),
             ).fetchone()
             if not item:
                 raise HTTPException(404, "Grocery item not found")
-        requirement = parse_requirement(item["name"])
+        requirement = stored_requirement(item["requirement"], item["name"])
         if body.search_term:
-            requirement["term"] = body.search_term.lower()
+            requirement["term"] = parse_requirement(body.search_term)["term"]
         location = app.state.kroger.location_id
         with db.connect() as conn:
             preference = conn.execute(

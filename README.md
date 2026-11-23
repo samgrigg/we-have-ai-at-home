@@ -228,3 +228,13 @@ Searches expire after 30 minutes. Product metadata/prices are selected from pers
 server results rather than accepted from the browser. Removed items lose their
 searches/choices; remembered product preferences persist. No pantry quantities are
 assumed or modified.
+
+
+Grocery items now persist parsed `requirement` metadata alongside their original
+list text: ingredient search term, normalized amount, dimension and base unit.
+For example, “1 c chicken broth” retains that display text while storing the term
+“chicken broth” and a volume requirement of 8 fl oz. Chat additions and confirmed
+recipe ingredients both populate this metadata; migration setup backfills older
+items. Product search reads the persisted requirement. Common abbreviations such
+as c/c., tbs/tbsp, tsp, oz and lb are recognized; unknown quantities remain marked
+for review. An edited product search also strips a recognized quantity prefix.

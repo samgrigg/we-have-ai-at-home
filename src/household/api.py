@@ -157,7 +157,7 @@ def create_app(settings: Settings | None = None):
     def shopping_list(user=authenticated):
         with db.connect() as conn:
             return conn.execute(
-                "SELECT s.name,u.display_name AS added_by_name, "
+                "SELECT s.name,s.requirement,u.display_name AS added_by_name, "
                 "CASE WHEN p.item_name IS NULL THEN NULL ELSE "
                 "jsonb_build_object('product',p.product,'packages',p.packages,"
                 "'location_id',p.location_id,'checked_at',p.checked_at,"

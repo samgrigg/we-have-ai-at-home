@@ -210,7 +210,7 @@ async function openProductSearch(item){
   const epoch=identityEpoch;
   const title=document.createElement('h3'); title.textContent='Products at your Smith’s';
   const original=document.createElement('p');original.textContent='Needed: '+item.name;
-  const query=document.createElement('input');query.type='text';query.maxLength=100;query.placeholder='Ingredient search';query.setAttribute?.('aria-label','Ingredient search');
+  const query=document.createElement('input');query.type='text';query.maxLength=100;query.placeholder='Ingredient search';query.value=item.requirement?.term||'';query.setAttribute?.('aria-label','Ingredient search');
   const search=document.createElement('button');search.textContent='Search';
   const close=document.createElement('button');close.textContent='Close';close.onclick=closeProductSearch;
   const results=document.createElement('div');results.id='product-results';

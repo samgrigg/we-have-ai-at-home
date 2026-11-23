@@ -8,6 +8,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from household.access import require_conversation
+from household.products import requirement_metadata
 from household.recipes import fetch_recipe, scale_ingredient
 
 
@@ -185,10 +186,11 @@ def configure_recipe_routes(app, db, authenticated):
                 for item in Items(items=names[offset : offset + 30]).items:
                     conn.execute(
                         (
-                            "INSERT INTO shopping_items(name,added_by) VALUES (%s,%s) ON "
+                            "INSERT INTO shopping_items(name,added_by,requirement) "
+                            "VALUES (%s,%s,%s) ON "
                             "CONFLICT DO NOTHING"
                         ),
-                        (item, user["id"]),
+                        (item, user["id"], Jsonb(requirement_metadata(item))),
                     )
             conn.execute(
                 "UPDATE recipe_imports SET status='confirmed',confirmed_indices=%s WHERE id=%s",
