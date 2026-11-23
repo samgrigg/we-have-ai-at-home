@@ -8,6 +8,8 @@ let conversations = [];
 let currentUser = null;
 let csrfToken = null;
 let identityEpoch = 0;
+let productRequest = 0;
+let productItem = null;
 let lastRecipeRender = "";
 const recipeSelections = new Map();
 
@@ -20,7 +22,7 @@ function requireEpoch(epoch) {
 function reportError(error) { if (!error.stale) notice(error.message); }
 
 function clearSensitiveState() {
-  identityEpoch++; lastRecipeRender = ""; recipeSelections.clear();
+  identityEpoch++; closeProductSearch(); lastRecipeRender = ""; recipeSelections.clear();
   current = null; pending = null; conversations = []; lastRender = ''; csrfToken = null;
   for (const id of ['messages','shopping-list','conversations','retry-area','recipe-imports']) $(id).replaceChildren();
   $('message').value = ''; $('current-user').textContent = ''; $('chat-title').textContent = '';
@@ -193,6 +195,81 @@ function renderRecipes(recipes, cid) {
   }
 }
 
+
+function closeProductSearch(){
+  productRequest++; productItem=null;
+  $('product-search').replaceChildren();
+}
+function productCurrent(epoch,request){
+  requireEpoch(epoch);
+  if(request!==productRequest){const error=new Error('Product search changed');error.stale=true;throw error;}
+}
+const money=value=>value===null?'Price unavailable':'$'+Number(value).toFixed(2);
+async function openProductSearch(item){
+  closeProductSearch(); productItem=item.name;
+  const epoch=identityEpoch;
+  const title=document.createElement('h3'); title.textContent='Products at your Smith’s';
+  const original=document.createElement('p');original.textContent='Needed: '+item.name;
+  const query=document.createElement('input');query.type='text';query.maxLength=100;query.placeholder='Ingredient search';query.setAttribute?.('aria-label','Ingredient search');
+  const search=document.createElement('button');search.textContent='Search';
+  const close=document.createElement('button');close.textContent='Close';close.onclick=closeProductSearch;
+  const results=document.createElement('div');results.id='product-results';
+  $('product-search').append(title,original,query,search,close,results);
+  const run=async()=>{
+    const request=++productRequest;search.disabled=true;
+    results.replaceChildren();const loading=document.createElement('p');loading.textContent='Finding package options…';results.append(loading);
+    try{
+      const body={item_name:item.name};if(query.value.trim())body.search_term=query.value.trim();
+      const found=await api('/api/products/search',{method:'POST',body:JSON.stringify(body)});
+      productCurrent(epoch,request);query.value=found.search_term;
+      renderProductResults(found,epoch,request);
+    }catch(error){
+      if(!error.stale && epoch===identityEpoch && request===productRequest){results.replaceChildren();const note=document.createElement('p');note.textContent=error.message;results.append(note);}
+    }finally{search.disabled=false;}
+  };
+  search.onclick=run;
+  query.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();run();}});
+  await run();
+}
+function renderProductResults(result,epoch,request){
+  productCurrent(epoch,request);
+  const results=$('product-results');results.replaceChildren();
+  const observed=document.createElement('p');observed.className='muted';observed.textContent='Catalog checked '+new Date(result.checked_at).toLocaleString()+'. Review ingredients, package sizes and current shelf stock.';
+  results.append(observed);
+  if(!result.candidates.length){const note=document.createElement('p');note.textContent='No suitable matches found. Try a more specific ingredient name, or shop using the original list item.';results.append(note);}
+  result.candidates.forEach((candidate,index)=>{
+    const card=document.createElement('article');card.className='product-candidate';
+    const title=document.createElement('h4');title.textContent=candidate.description+(candidate.preferred?' · Your usual choice':index===0 && candidate.selectable?' · Suggested option':'');
+    const details=document.createElement('p');details.textContent=`${candidate.size} · ${money(candidate.price)} per package · Reported stock: ${candidate.stock}`;
+    const quantity=document.createElement('input');quantity.type='number';quantity.min=String(candidate.packages||1);quantity.max='99';quantity.step='1';quantity.value=String(candidate.packages||1);quantity.setAttribute?.('aria-label','Number of packages');
+    const label=document.createElement('label');label.textContent='Packages: ';label.append(quantity);
+    const estimate=document.createElement('p');
+    const update=()=>{
+      const count=Number(quantity.value);
+      const cost=candidate.price===null?null:candidate.price*count;
+      const remaining=candidate.package_amount===null || candidate.package_amount===undefined?null:candidate.remaining+(count-candidate.packages)*candidate.package_amount;
+      estimate.textContent=(candidate.quantity_review?'Quantity needs review; one package is a starting value, not a calculated recommendation. ':`Covers requirement; approximately ${Number(remaining.toFixed(2))} ${candidate.unit} left. `)+(cost===null?'Price unavailable.':`Estimated total: ${money(cost)}.`);
+    };
+    quantity.oninput=update;update();
+    const remember=document.createElement('input');remember.type='checkbox';remember.checked=candidate.preferred;
+    const preference=document.createElement('label');preference.textContent='Remember as our usual product ';preference.append(remember);
+    const choose=document.createElement('button');choose.textContent='Select product';choose.disabled=!candidate.selectable;
+    const status=document.createElement('p');status.className='muted';
+    choose.onclick=async()=>{
+      try{
+        productCurrent(epoch,request);choose.disabled=true;
+        const count=Number(quantity.value);
+        if(!Number.isInteger(count)||count<Number(quantity.min)||count>99)throw new Error('Choose a valid package count that covers the requirement.');
+        await api('/api/products/select',{method:'POST',body:JSON.stringify({search_id:result.id,candidate_id:candidate.candidate_id,packages:count,remember:remember.checked})});
+        productCurrent(epoch,request);status.textContent='Product choice saved to the shared list.';
+        await refresh();
+      }catch(error){if(!error.stale)status.textContent=error.message;}
+      finally{choose.disabled=!candidate.selectable;}
+    };
+    card.append(title,details,label,estimate,preference,choose,status);results.append(card);
+  });
+}
+
 async function refresh() {
   if (polling) return;
   polling = true;
@@ -238,12 +315,22 @@ async function refresh() {
     }
     if (pending) submissionControls();
     setBusy(jobs.some((j) => !['completed','cancelled'].includes(j.status)));
+    if(productItem && !items.some(item=>item.name===productItem)) closeProductSearch();
     $('shopping-list').replaceChildren();
     for (const item of items) {
       const li = document.createElement('li'); li.textContent = item.name;
       if (item.added_by_name) {
         const by = document.createElement('span'); by.className='item-author'; by.textContent='Added by '+item.added_by_name; li.append(by);
       }
+      if(item.product_selection){
+        const selected=item.product_selection;
+        const details=document.createElement('p'); details.className='selected-product';
+        details.textContent=`Selected: ${selected.packages} × ${selected.product.description} (${selected.product.size}). Price observed ${new Date(selected.checked_at).toLocaleString()}. Chosen by ${selected.selected_by_name}.`;
+        li.append(details);
+      }
+      const find=document.createElement('button'); find.textContent=item.product_selection?'Change product':'Find products at Smith’s';
+      find.onclick=()=>openProductSearch(item);
+      li.append(find);
       $('shopping-list').append(li);
     }
     if (!items.length) {

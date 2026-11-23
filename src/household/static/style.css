@@ -9,3 +9,13 @@
 .recipe-ingredient { display: flex; align-items: flex-start; gap: 10px; padding: 7px 0; font-size: .9rem; }
 .recipe-ingredient input { flex: 0 0 auto; width: 18px; height: 18px; margin: 0; }
 .recipe-preview button { margin: 8px 8px 0 0; }
+
+#product-search:not(:empty) { border: 1px solid var(--line, #d7d7ce); border-radius: 12px; padding: 12px; margin: 12px 0; max-height: 65vh; overflow: auto; }
+#product-search input[type=text] { width: 100%; box-sizing: border-box; padding: 8px; margin-bottom: 8px; }
+.product-candidate { border-top: 1px solid var(--line, #d7d7ce); margin-top: 12px; padding-top: 8px; }
+.product-candidate h4 { margin: 6px 0; }
+.product-candidate input[type=number] { width: 60px; padding: 6px; }
+.product-candidate input[type=checkbox] { width: 18px; height: 18px; }
+.product-candidate label { display: block; margin: 8px 0; }
+.product-candidate p, .selected-product { font-size: .8rem; line-height: 1.5; }
+#shopping-list button { font-size: .8rem; margin-top: 8px; }

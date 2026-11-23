@@ -187,3 +187,44 @@ original hostname. Fetching runs in a credential-free subprocess killed after 25
 seconds, with bounded redirects and a 2 MB response cap. It holds no shared shopping
 list lock while contacting a recipe site. Tool traces include fetch timing without
 logging URLs or page contents. A numbered additive migration stores recipe previews.
+
+## Smith's product selection (POV)
+
+Each shared grocery item offers **Find products at Smith’s**. Review the search term,
+product, package size, reported stock and price observation time. Whole-package
+recommendations cover compatible ingredient quantities; you can choose a larger
+package or increase the count. **Select product** saves the choice alongside the
+original ingredient, attributed to the selecting family member. **Remember as our
+usual product** makes that product a preferred candidate for the same ingredient
+search at this store. Any family member can replace a shared list choice.
+
+This is product selection only: there are no cart, ordering, checkout or customer
+account integrations. Selecting a product does not mark it purchased or replenish
+pantry inventory. Costco catalog and persisted pantry tracking remain future work.
+
+Kroger configuration belongs on the API only:
+
+```dotenv
+KROGER_CLIENT_ID=
+KROGER_CLIENT_SECRET=
+KROGER_LOCATION_ID=70600153
+```
+
+Location `70600153` was verified through the API as Smith’s at 10305 S 1300 E, Sandy.
+Credentials need the public product API; the client uses client-credentials with
+`product.compact`. It caches the token in memory and contacts only Kroger's fixed
+token and product endpoints. The worker never receives Kroger credentials.
+Without configuration, the ordinary grocery list still works and product searches
+show a setup message. Existing Render services need these optional API variables
+set manually; `sync: false` does not prompt again when syncing an existing service.
+
+Matching is deliberately conservative, using ingredient words and food-form filters.
+It is not an allergy or ingredient-label verifier. No mass-to-volume or weight-to-count
+conversions are guessed. Unknown sizes, package/container wording and incompatible
+units require manual quantity review. A missing stock signal remains unknown;
+reported-out-of-stock products cannot be selected. Prices are observations, not
+checkout quotes. Missing/zero promo prices do not override valid regular prices.
+Searches expire after 30 minutes. Product metadata/prices are selected from persisted
+server results rather than accepted from the browser. Removed items lose their
+searches/choices; remembered product preferences persist. No pantry quantities are
+assumed or modified.

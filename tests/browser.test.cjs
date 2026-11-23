@@ -22,7 +22,7 @@ async function harness(pending = null) {
   let destination = null;
   let heldConversation = null;
   const context = vm.createContext({
-    document: {getElementById(id) { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); }, createElement: () => new Element()},
+    document: {getElementById(id) { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); }, createElement: () => {const el=new Element(); Object.defineProperty(el,'id',{set(value){elements.set(value,el);}}); return el;}},
     localStorage: storage({'household-conversation': 'c1'}),
     sessionStorage: storage(pending ? {'household-pending': JSON.stringify(pending)} : {}),
     crypto: require('crypto'),
@@ -130,3 +130,25 @@ async function harness(pending = null) {
   assert.equal(box.checked,false,'a revised preview must use the final server omission selection');
   console.log('Recipe revision selection check passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});
+
+(async()=>{
+ const h=await harness();
+ vm.runInContext(`renderProductResults({id:'s1',item_name:'1/2 cup heavy cream',search_term:'heavy cream',checked_at:'2026-11-22T12:00:00Z',candidates:[{candidate_id:'cream:0',description:'Heavy Cream',size:'1 pt',price:3.39,stock:'HIGH',selectable:true,packages:1,remaining:12,unit:'fl oz',quantity_review:false,package_amount:16,preferred:false}]},identityEpoch,productRequest)`,h.context);
+ assert(h.elements.get('product-results').children.length>0,'product candidates should render');
+ vm.runInContext('clearSensitiveState()',h.context);
+ assert.equal(h.elements.get('product-search').children.length,0,'product results must clear on account change');
+ console.log('Product result rendering and privacy checks passed');
+})().catch(e=>{console.error(e);process.exitCode=1;});
+
+
+(async()=>{
+ const h=await harness();
+ let release;
+ h.context.api=async()=>await new Promise(resolve=>{release=resolve;});
+ const loading=vm.runInContext('openProductSearch({name:"milk"})',h.context);
+ vm.runInContext('closeProductSearch()',h.context);
+ release({id:'late',search_term:'milk',candidates:[],checked_at:'2026-11-22T12:00:00Z'});
+ await loading;
+ assert.equal(h.elements.get('product-search').children.length,0,'closed searches must reject delayed product results');
+ console.log('Delayed product response fencing check passed');
+})().catch(e=>{console.error(e);process.exitCode=1;});

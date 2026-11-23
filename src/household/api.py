@@ -11,6 +11,8 @@ from household.access import require_conversation
 from household.auth import COOKIE, configure_auth
 from household.config import Settings
 from household.db import Database
+from household.kroger import KrogerClient
+from household.product_selection import configure_product_routes
 from household.recipe_import import configure_recipe_routes
 
 
@@ -39,6 +41,10 @@ def create_app(settings: Settings | None = None):
     app.state.settings = settings
     auth = configure_auth(app, db, settings)
     authenticated = Depends(auth.current)
+    app.state.kroger = KrogerClient(
+        settings.kroger_client_id, settings.kroger_client_secret, settings.kroger_location_id
+    )
+    configure_product_routes(app, db, authenticated)
     configure_recipe_routes(app, db, authenticated)
     static = files("household").joinpath("static")
     app.mount("/static", StaticFiles(directory=str(static), check_dir=False), name="static")
@@ -151,8 +157,14 @@ def create_app(settings: Settings | None = None):
     def shopping_list(user=authenticated):
         with db.connect() as conn:
             return conn.execute(
-                "SELECT s.name,u.display_name AS added_by_name FROM shopping_items s "
-                "LEFT JOIN users u ON u.id=s.added_by ORDER BY s.name"
+                "SELECT s.name,u.display_name AS added_by_name, "
+                "CASE WHEN p.item_name IS NULL THEN NULL ELSE "
+                "jsonb_build_object('product',p.product,'packages',p.packages,"
+                "'location_id',p.location_id,'checked_at',p.checked_at,"
+                "'selected_by_name',selected_user.display_name) END AS product_selection "
+                "FROM shopping_items s LEFT JOIN users u ON u.id=s.added_by "
+                "LEFT JOIN product_selections p ON p.item_name=s.name "
+                "LEFT JOIN users selected_user ON selected_user.id=p.selected_by ORDER BY s.name"
             ).fetchall()
 
     @app.post("/api/jobs/{jid}/cancel", status_code=204)

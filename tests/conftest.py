@@ -30,6 +30,8 @@ def app(database_url):
 
     settings = Settings(
         database_url=database_url,
+        kroger_client_id="test-client",
+        kroger_client_secret="test-secret",
         family_allowed_emails=",".join(f"member{i}@example.com" for i in range(5)),
         google_client_id="test-client",
         google_client_secret="test-secret",

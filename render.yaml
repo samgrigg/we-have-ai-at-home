@@ -32,6 +32,12 @@ projects:
                 sync: false
               - key: GOOGLE_CLIENT_SECRET
                 sync: false
+              - key: KROGER_CLIENT_ID
+                sync: false
+              - key: KROGER_CLIENT_SECRET
+                sync: false
+              - key: KROGER_LOCATION_ID
+                value: "70600153"
               - key: SESSION_SECRET
                 generateValue: true
               - key: PUBLIC_BASE_URL

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     session_secret: SecretStr | None = None
     public_base_url: str = "http://localhost:8001"
     openai_api_key: SecretStr | None = None
+    kroger_client_id: str = ""
+    kroger_client_secret: SecretStr | None = None
+    kroger_location_id: str = Field(default="70600153", pattern=r"^\d{8}$")
     model_name: str = "gpt-4.1-mini"
     # Set these to your provider's current rates to enable cost estimates.
     input_usd_per_million: float | None = Field(default=None, ge=0)
